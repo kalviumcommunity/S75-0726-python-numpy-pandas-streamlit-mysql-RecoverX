@@ -2,30 +2,29 @@ import streamlit as st
 
 # Page configuration
 st.set_page_config(
-    page_title="RecoverX - Payment Analytics",
+    page_title="RecoverX - Dashboard",
     page_icon="💰",
     layout="wide"
 )
 
 # Main header
 st.title("💰 RecoverX")
-st.subheader("Payment Analytics Platform")
+st.subheader("Payment Analytics Platform - Dashboard")
 st.divider()
 
-# Sidebar
-with st.sidebar:
-    st.header("Navigation")
-    page = st.radio(
-        "Go to",
-        ["Dashboard", "Payment Lifecycle", "Failure Analysis", "Retry Analytics", "Revenue Recovery", "Alerts"]
-    )
-    st.divider()
-    st.header("Filters")
-    date_range = st.date_input("Select Date Range")
+st.write("Welcome to RecoverX! Use the navigation sidebar to explore different sections.")
+st.divider()
 
-# Main content area
-st.header(f"{page}")
-st.write("This page will contain the relevant analytics.")
+st.header("Key Metrics (Placeholder)")
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Transactions", "12,345", "+12%")
+with col2:
+    st.metric("Success Rate", "85%", "+2%")
+with col3:
+    st.metric("Revenue Recovered", "$45,678", "+15%")
+with col4:
+    st.metric("Retry Attempts", "3,456", "-5%")
 
 # Footer
 st.divider()
