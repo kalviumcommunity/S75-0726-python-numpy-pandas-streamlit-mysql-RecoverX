@@ -2,21 +2,24 @@
 import random
 import string
 from datetime import datetime, timedelta
-import pandas as pd
-import mysql.connector
-from mysql.connector import Error
-from dotenv import load_dotenv
+import sys
 import os
 
-load_dotenv()
+# Add project root to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from src.db import get_db_connection, close_db_connection, execute_query, execute_many
+
 
 def generate_transaction_id():
     """Generate a random transaction ID."""
     return f"TXN-{''.join(random.choices(string.ascii_uppercase + string.digits, k=12))}"
 
+
 def generate_customer_id():
     """Generate a random customer ID."""
     return f"CUST-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
+
 
 def generate_random_date(start_date, end_date):
     """Generate a random date between start and end date."""
@@ -25,22 +28,8 @@ def generate_random_date(start_date, end_date):
     random_seconds = random.randint(0, 86399)
     return start_date + timedelta(days=random_days, seconds=random_seconds)
 
-def connect_to_db():
-    """Connect to MySQL database."""
-    try:
-        connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST", "localhost"),
-            user=os.getenv("DB_USER", "root"),
-            password=os.getenv("DB_PASSWORD", ""),
-            database=os.getenv("DB_NAME", "recoverx")
-        )
-        if connection.is_connected():
-            return connection
-    except Error as e:
-        print(f"Error connecting to MySQL: {e}")
-        return None
 
-def insert_bank_response_codes(connection):
+def insert_bank_response_codes():
     """Insert bank response codes data."""
     response_codes = [
         ("00", "Global Bank", "Approved", "TEMPORARY", 0.00, "No action needed"),
@@ -54,36 +43,28 @@ def insert_bank_response_codes(connection):
         ("03", "City Bank", "Invalid Merchant", "PERMANENT", 0.00, "Verify merchant details"),
         ("12", "City Bank", "Invalid Transaction", "PERMANENT", 0.30, "Check transaction details")
     ]
-    cursor = connection.cursor()
+    
     for code in response_codes:
-        try:
-            cursor.execute("""
-                INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, code)
-        except Error:
-            pass  # Ignore duplicates
-    connection.commit()
-    cursor.close()
+        execute_query("""
+            INSERT IGNORE INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, code)
 
-def insert_alert_rules(connection):
+
+def insert_alert_rules():
     """Insert alert rules data."""
     rules = [
-        ("High Failure Rate", "failure_rate", 30.00, "&gt;", True),
-        ("Response Code Trend", "response_trend", 20.00, "&gt;", True),
-        ("Low Success Rate", "success_rate", 70.00, "&lt;", True)
+        ("High Failure Rate", "failure_rate", 30.00, ">", True),
+        ("Response Code Trend", "response_trend", 20.00, ">", True),
+        ("Low Success Rate", "success_rate", 70.00, "<", True)
     ]
-    cursor = connection.cursor()
+    
     for rule in rules:
-        try:
-            cursor.execute("""
-                INSERT INTO alert_rules (rule_name, rule_type, threshold_value, threshold_condition, is_active)
-                VALUES (%s, %s, %s, %s, %s)
-            """, rule)
-        except Error:
-            pass  # Ignore duplicates
-    connection.commit()
-    cursor.close()
+        execute_query("""
+            INSERT IGNORE INTO alert_rules (rule_name, rule_type, threshold_value, threshold_condition, is_active)
+            VALUES (%s, %s, %s, %s, %s)
+        """, rule)
+
 
 def generate_synthetic_data(num_transactions=100):
     """Generate synthetic test data."""
@@ -145,7 +126,7 @@ def generate_synthetic_data(num_transactions=100):
             failure_type = random.choice(failure_types)
             root_cause = "Insufficient funds" if failure_type == "TEMPORARY" else "Invalid card"
             recovery_score = round(random.uniform(0.1, 1.0), 2)
-            is_high_value = amount &gt; 1000
+            is_high_value = amount > 1000
             classified_at = created_at + timedelta(hours=1)
 
             failure_classifications.append((
@@ -166,62 +147,61 @@ def generate_synthetic_data(num_transactions=100):
 
     return transactions, payment_retries, failure_classifications, alerts
 
-def insert_data(connection, transactions, payment_retries, failure_classifications, alerts):
-    """Insert generated data into the database."""
-    cursor = connection.cursor()
 
+def insert_data(transactions, payment_retries, failure_classifications, alerts):
+    """Insert generated data into the database."""
     # Insert transactions
-    for txn in transactions:
-        cursor.execute("""
+    if transactions:
+        execute_many("""
             INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, txn)
+        """, transactions)
 
     # Insert payment retries
-    for retry in payment_retries:
-        cursor.execute("""
+    if payment_retries:
+        execute_many("""
             INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, retry)
+        """, payment_retries)
 
     # Insert failure classifications
-    for fc in failure_classifications:
-        cursor.execute("""
+    if failure_classifications:
+        execute_many("""
             INSERT INTO failure_classifications (transaction_id, failure_type, root_cause, recovery_score, is_high_value, classified_at)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, fc)
+        """, failure_classifications)
 
     # Insert alerts
-    for alert in alerts:
-        cursor.execute("""
+    if alerts:
+        execute_many("""
             INSERT INTO alerts (rule_id, alert_type, message, severity, created_at)
             VALUES (%s, %s, %s, %s, %s)
-        """, alert)
+        """, alerts)
 
-    connection.commit()
-    cursor.close()
 
 def main():
     """Main function to generate and insert data."""
-    connection = connect_to_db()
+    # Test connection first
+    connection = get_db_connection()
     if not connection:
         print("Could not connect to database.")
         return
+    close_db_connection(connection)
 
     print("Generating synthetic test data...")
 
     # Insert reference data
-    insert_bank_response_codes(connection)
-    insert_alert_rules(connection)
+    insert_bank_response_codes()
+    insert_alert_rules()
 
     # Generate synthetic data
     transactions, payment_retries, failure_classifications, alerts = generate_synthetic_data(num_transactions=100)
 
     # Insert into database
-    insert_data(connection, transactions, payment_retries, failure_classifications, alerts)
+    insert_data(transactions, payment_retries, failure_classifications, alerts)
 
     print("Successfully inserted synthetic data!")
-    connection.close()
+
 
 if __name__ == "__main__":
     main()

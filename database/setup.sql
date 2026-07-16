@@ -31,58 +31,44 @@ CREATE TABLE IF NOT EXISTS payment_retries (
 );
 
 CREATE TABLE IF NOT EXISTS bank_response_codes (
-
     response_code VARCHAR(10) PRIMARY KEY,
-
+    bank_name VARCHAR(100),
     description VARCHAR(255) NOT NULL,
-
-    failure_type ENUM('Temporary','Permanent') NOT NULL,
-
-    recoverable BOOLEAN NOT NULL,
-
+    failure_type ENUM('TEMPORARY','PERMANENT') NOT NULL,
+    recovery_potential DECIMAL(5,2),
+    recommended_action TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
-CREATE TABLE IF NOT EXISTS payment_classifications (
-
+CREATE TABLE IF NOT EXISTS failure_classifications (
     classification_id INT AUTO_INCREMENT PRIMARY KEY,
-
     transaction_id VARCHAR(100) NOT NULL,
-
-    response_code VARCHAR(10),
-
-    failure_type ENUM('Temporary','Permanent'),
-
+    failure_type ENUM('TEMPORARY','PERMANENT'),
+    root_cause TEXT,
     recovery_score DECIMAL(5,2),
-
-    final_status VARCHAR(50),
-
+    is_high_value BOOLEAN,
     classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
     FOREIGN KEY (transaction_id)
         REFERENCES transactions(transaction_id)
-        ON DELETE CASCADE,
-
-    FOREIGN KEY (response_code)
-        REFERENCES bank_response_codes(response_code)
-
+        ON DELETE CASCADE
 );
 
-INSERT INTO bank_response_codes
-(response_code, description, failure_type, recoverable)
-VALUES
+CREATE TABLE IF NOT EXISTS alert_rules (
+    rule_id INT AUTO_INCREMENT PRIMARY KEY,
+    rule_name VARCHAR(100) NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    threshold_value DECIMAL(10,2) NOT NULL,
+    threshold_condition VARCHAR(10) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-('00', 'Approved', 'Temporary', TRUE),
-
-('05', 'Do Not Honor', 'Permanent', FALSE),
-
-('14', 'Invalid Card Number', 'Permanent', FALSE),
-
-('51', 'Insufficient Funds', 'Temporary', TRUE),
-
-('54', 'Expired Card', 'Permanent', FALSE),
-
-('91', 'Issuer Unavailable', 'Temporary', TRUE),
-
-('96', 'System Error', 'Temporary', TRUE);
+CREATE TABLE IF NOT EXISTS alerts (
+    alert_id INT AUTO_INCREMENT PRIMARY KEY,
+    rule_id INT,
+    alert_type VARCHAR(50) NOT NULL,
+    message TEXT,
+    severity VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (rule_id) REFERENCES alert_rules(rule_id) ON DELETE SET NULL
+);
