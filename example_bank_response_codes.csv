@@ -1,0 +1,6 @@
+
+response_code,bank_name,description,failure_type,recovery_potential,recommended_action
+00,Global Bank,Approved,TEMPORARY,0.00,No action needed
+51,Global Bank,Insufficient Funds,TEMPORARY,0.80,Retry after 24 hours
+05,Global Bank,Do Not Honor,PERMANENT,0.10,Contact customer for alternative payment
+
