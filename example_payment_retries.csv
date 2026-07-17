@@ -1,0 +1,5 @@
+
+transaction_id,attempt_number,retry_timestamp,retry_status,response_code,response_message
+TXN-XYZ789GHI012,1,2026-07-02 15:00:00,Failed,51,Insufficient Funds
+TXN-XYZ789GHI012,2,2026-07-02 16:45:00,Success,00,Approved
+

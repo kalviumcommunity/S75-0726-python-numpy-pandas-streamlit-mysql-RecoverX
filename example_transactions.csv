@@ -1,0 +1,5 @@
+
+transaction_id,customer_id,amount,currency,payment_method,gateway,initial_status,final_status,created_at,updated_at
+TXN-ABC123DEF456,CUST-1234ABCD,99.99,USD,Credit Card,Stripe,Success,Success,2026-07-01 10:00:00,2026-07-01 10:00:00
+TXN-XYZ789GHI012,CUST-5678EFGH,199.50,USD,Debit Card,PayPal,Failed,Success,2026-07-02 14:30:00,2026-07-02 16:45:00
+
