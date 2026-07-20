@@ -1,9 +1,14 @@
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+
 import streamlit as st
 import pandas as pd
 import mysql.connector
 from mysql.connector import Error
 from dotenv import load_dotenv
 import os
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer
 
 load_dotenv()
 
@@ -100,22 +105,10 @@ def import_bank_response_codes(df):
         if connection and connection.is_connected():
             connection.close()
 
-st.set_page_config(
-    page_title="RecoverX - CSV Import",
-    page_icon="📥",
-    layout="wide"
-)
+setup_page("CSV Import", "📥")
+render_header()
+date_range = render_sidebar()
 
-# Sidebar
-with st.sidebar:
-    st.header("💰 RecoverX")
-    st.caption("Recover Your Revenue")
-    st.divider()
-    st.subheader("Filters")
-    date_range = st.date_input("Select Date Range")
-
-# Main Content
-st.title("📥 CSV Import")
 st.subheader("Import CSV data into the RecoverX database")
 st.divider()
 
@@ -148,6 +141,4 @@ with open("example_payment_retries.csv", "rb") as f:
 with open("example_bank_response_codes.csv", "rb") as f:
     st.download_button("Download Bank Response Codes Template", f, "example_bank_response_codes.csv")
 
-# Footer
-st.divider()
-st.caption("RecoverX - Recover Your Revenue")
+render_footer()
