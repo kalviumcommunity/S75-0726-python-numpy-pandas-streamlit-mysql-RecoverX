@@ -5,6 +5,7 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import os
 from datetime import datetime
+from src.data_cleaning import clean_transactions, clean_payment_retries, clean_bank_response_codes
 
 load_dotenv()
 
@@ -31,29 +32,31 @@ def import_transactions_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
+        # Clean the data
+        cleaned_df = clean_transactions(df)
         cursor = connection.cursor()
 
-        for _, row in df.iterrows():
+        for _, row in cleaned_df.iterrows():
             cursor.execute("""
                 INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 row['transaction_id'], row['customer_id'], row['amount'], row.get('currency', 'USD'),
-                row.get('payment_method', ''), row.get('gateway', ''), row['initial_status'],
-                row.get('final_status', row['initial_status']),
+                row.get('payment_method', None), row.get('gateway', None), row['initial_status'],
+                row.get('final_status', None),
                 pd.to_datetime(row['created_at']),
                 pd.to_datetime(row.get('updated_at', row['created_at']))
             ))
 
         connection.commit()
         cursor.close()
-        print(f"Successfully imported {len(df)} transactions!")
+        print(f"Successfully imported {len(cleaned_df)} transactions!")
         return True
     except Exception as e:
         print(f"Error importing transactions: {e}")
         return False
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             connection.close()
 
 def import_payment_retries_from_csv(csv_file_path):
@@ -64,26 +67,28 @@ def import_payment_retries_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
+        # Clean the data
+        cleaned_df = clean_payment_retries(df)
         cursor = connection.cursor()
 
-        for _, row in df.iterrows():
+        for _, row in cleaned_df.iterrows():
             cursor.execute("""
                 INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 row['transaction_id'], row['attempt_number'], pd.to_datetime(row['retry_timestamp']),
-                row['retry_status'], row.get('response_code', ''), row.get('response_message', '')
+                row['retry_status'], row.get('response_code', None), row.get('response_message', None)
             ))
 
         connection.commit()
         cursor.close()
-        print(f"Successfully imported {len(df)} payment retries!")
+        print(f"Successfully imported {len(cleaned_df)} payment retries!")
         return True
     except Exception as e:
         print(f"Error importing payment retries: {e}")
         return False
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             connection.close()
 
 def import_bank_response_codes_from_csv(csv_file_path):
@@ -94,27 +99,29 @@ def import_bank_response_codes_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
+        # Clean the data
+        cleaned_df = clean_bank_response_codes(df)
         cursor = connection.cursor()
 
-        for _, row in df.iterrows():
+        for _, row in cleaned_df.iterrows():
             cursor.execute("""
                 INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
-                row['response_code'], row.get('bank_name', ''), row['description'],
-                row['failure_type'], row.get('recovery_potential', 0.0),
-                row.get('recommended_action', '')
+                row['response_code'], row.get('bank_name', None), row['description'],
+                row['failure_type'], row.get('recovery_potential', None),
+                row.get('recommended_action', None)
             ))
 
         connection.commit()
         cursor.close()
-        print(f"Successfully imported {len(df)} bank response codes!")
+        print(f"Successfully imported {len(cleaned_df)} bank response codes!")
         return True
     except Exception as e:
         print(f"Error importing bank response codes: {e}")
         return False
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             connection.close()
 
 def main():
@@ -134,4 +141,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
