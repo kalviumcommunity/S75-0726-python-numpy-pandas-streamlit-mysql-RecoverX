@@ -121,3 +121,5 @@ venv.bak/
 # OS files
 desktop.ini
 Thumbs.db
+__pycache__/
+*.pyc

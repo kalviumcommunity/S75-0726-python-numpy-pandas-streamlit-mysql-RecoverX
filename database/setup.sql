@@ -1,5 +1,4 @@
-CREATE DATABASE IF NOT EXISTS recoverx;
-USE recoverx;
+
 
 CREATE TABLE IF NOT EXISTS transactions (
     transaction_id VARCHAR(100) PRIMARY KEY,
