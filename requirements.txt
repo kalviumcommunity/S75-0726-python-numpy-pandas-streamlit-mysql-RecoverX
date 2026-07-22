@@ -3,8 +3,6 @@ pandas
 numpy
 mysql-connector-python
 python-dotenv
-Dashboard-header-and-theme-setup
 plotly
 fastapi
 uvicorn
- main
