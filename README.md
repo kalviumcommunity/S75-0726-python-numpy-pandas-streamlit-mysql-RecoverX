@@ -132,6 +132,12 @@ Revenue Recovery Analytics
 
 ---
 
+## Database Setup
+
+For detailed instructions on setting up the RecoverX database, please see the [Database Setup Guide](database/DATABASE_SETUP.md).
+
+---
+
 ##  Conclusion
 
 RecoverX transforms fragmented payment data into meaningful business insights by providing complete visibility into payment retries, failure classifications, and revenue recovery opportunities. By enabling data-driven decision-making, the platform helps organizations improve payment success rates, optimize retry strategies, and reduce revenue leakage through a simple and interactive analytics dashboard.
