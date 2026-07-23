@@ -1,9 +1,17 @@
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+import pandas as pd
+import json
+from io import StringIO
 from src.db import execute_query, execute_many
+from src.data_cleaning import (
+    clean_transactions,
+    clean_payment_retries,
+    clean_bank_response_codes
+)
 from src.payment_queries import (
     get_all_transactions,
     count_all_transactions,
@@ -319,6 +327,172 @@ def get_response_code_analysis_data(
         "total": total,
         "pages": (total + limit - 1) // limit
     }
+
+
+# -----------------------------
+# Bulk Import Endpoints
+# -----------------------------
+
+def df_to_transaction_params(df):
+    """Convert cleaned transactions DataFrame to list of tuples for execute_many."""
+    params = []
+    for _, row in df.iterrows():
+        final_status = row.get("final_status") or row["initial_status"]
+        updated_at = row.get("updated_at") or row["created_at"]
+        params.append((
+            row["transaction_id"],
+            row["customer_id"],
+            row["amount"],
+            row.get("currency", "USD"),
+            row.get("payment_method"),
+            row.get("gateway"),
+            row["initial_status"],
+            final_status,
+            pd.to_datetime(row["created_at"]),
+            pd.to_datetime(updated_at)
+        ))
+    return params
+
+
+def df_to_payment_retry_params(df):
+    """Convert cleaned payment retries DataFrame to list of tuples for execute_many."""
+    params = []
+    for _, row in df.iterrows():
+        params.append((
+            row["transaction_id"],
+            row["attempt_number"],
+            pd.to_datetime(row["retry_timestamp"]),
+            row["retry_status"],
+            row.get("response_code"),
+            row.get("response_message")
+        ))
+    return params
+
+
+def df_to_bank_response_code_params(df):
+    """Convert cleaned bank response codes DataFrame to list of tuples for execute_many."""
+    params = []
+    for _, row in df.iterrows():
+        params.append((
+            row["response_code"],
+            row.get("bank_name"),
+            row["description"],
+            row["failure_type"],
+            row.get("recovery_potential"),
+            row.get("recommended_action")
+        ))
+    return params
+
+
+@app.post("/api/transactions/bulk/csv")
+async def bulk_import_transactions_csv(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        df = pd.read_csv(StringIO(contents.decode("utf-8")))
+        cleaned_df = clean_transactions(df)
+        if cleaned_df.empty:
+            raise HTTPException(status_code=400, detail="No valid transactions to import")
+        params = df_to_transaction_params(cleaned_df)
+        execute_many("""
+            INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, params)
+        return {"message": f"Successfully imported {len(cleaned_df)} transactions", "count": len(cleaned_df)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import transactions: {str(e)}")
+
+
+@app.post("/api/transactions/bulk/json")
+async def bulk_import_transactions_json(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        data = json.loads(contents.decode("utf-8"))
+        df = pd.DataFrame(data)
+        cleaned_df = clean_transactions(df)
+        if cleaned_df.empty:
+            raise HTTPException(status_code=400, detail="No valid transactions to import")
+        params = df_to_transaction_params(cleaned_df)
+        execute_many("""
+            INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, params)
+        return {"message": f"Successfully imported {len(cleaned_df)} transactions", "count": len(cleaned_df)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import transactions: {str(e)}")
+
+
+@app.post("/api/payment-retries/bulk/csv")
+async def bulk_import_payment_retries_csv(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        df = pd.read_csv(StringIO(contents.decode("utf-8")))
+        cleaned_df = clean_payment_retries(df)
+        if cleaned_df.empty:
+            raise HTTPException(status_code=400, detail="No valid payment retries to import")
+        params = df_to_payment_retry_params(cleaned_df)
+        execute_many("""
+            INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, params)
+        return {"message": f"Successfully imported {len(cleaned_df)} payment retries", "count": len(cleaned_df)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import payment retries: {str(e)}")
+
+
+@app.post("/api/payment-retries/bulk/json")
+async def bulk_import_payment_retries_json(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        data = json.loads(contents.decode("utf-8"))
+        df = pd.DataFrame(data)
+        cleaned_df = clean_payment_retries(df)
+        if cleaned_df.empty:
+            raise HTTPException(status_code=400, detail="No valid payment retries to import")
+        params = df_to_payment_retry_params(cleaned_df)
+        execute_many("""
+            INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, params)
+        return {"message": f"Successfully imported {len(cleaned_df)} payment retries", "count": len(cleaned_df)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import payment retries: {str(e)}")
+
+
+@app.post("/api/bank-response-codes/bulk/csv")
+async def bulk_import_bank_response_codes_csv(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        df = pd.read_csv(StringIO(contents.decode("utf-8")))
+        cleaned_df = clean_bank_response_codes(df)
+        if cleaned_df.empty:
+            raise HTTPException(status_code=400, detail="No valid bank response codes to import")
+        params = df_to_bank_response_code_params(cleaned_df)
+        execute_many("""
+            INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, params)
+        return {"message": f"Successfully imported {len(cleaned_df)} bank response codes", "count": len(cleaned_df)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import bank response codes: {str(e)}")
+
+
+@app.post("/api/bank-response-codes/bulk/json")
+async def bulk_import_bank_response_codes_json(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        data = json.loads(contents.decode("utf-8"))
+        df = pd.DataFrame(data)
+        cleaned_df = clean_bank_response_codes(df)
+        if cleaned_df.empty:
+            raise HTTPException(status_code=400, detail="No valid bank response codes to import")
+        params = df_to_bank_response_code_params(cleaned_df)
+        execute_many("""
+            INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, params)
+        return {"message": f"Successfully imported {len(cleaned_df)} bank response codes", "count": len(cleaned_df)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import bank response codes: {str(e)}")
 
 
 # -----------------------------
