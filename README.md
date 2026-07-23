@@ -136,6 +136,10 @@ Revenue Recovery Analytics
 
 For detailed instructions on setting up the RecoverX database, please see the [Database Setup Guide](database/DATABASE_SETUP.md).
 
+## API Documentation
+
+For complete API documentation, including how to test endpoints, please see the [API Documentation Guide](API_DOCUMENTATION.md).
+
 ---
 
 ##  Conclusion
