@@ -1,18 +1,27 @@
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from src.db import execute_query, execute_many
 from src.payment_queries import (
     get_all_transactions,
+    count_all_transactions,
     get_transaction_by_id,
     get_retry_history,
+    count_retry_history,
     get_payment_lifecycle,
+    count_payment_lifecycle,
     get_bank_response_codes,
+    count_bank_response_codes,
     get_temporary_failures,
+    count_temporary_failures,
     get_permanent_failures,
+    count_permanent_failures,
     get_failure_classifications,
+    count_failure_classifications,
     get_response_code_analysis,
+    count_response_code_analysis,
     get_total_transactions,
     get_successful_transactions,
     get_failed_transactions
@@ -62,11 +71,21 @@ class BankResponseCodeCreate(BaseModel):
 # -----------------------------
 
 @app.get("/api/transactions")
-def list_transactions():
-    transactions = get_all_transactions()
+def list_transactions(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    transactions = get_all_transactions(page, limit)
     if transactions is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve transactions")
-    return {"data": transactions}
+    total = count_all_transactions()
+    return {
+        "data": transactions,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 @app.get("/api/transactions/{transaction_id}")
@@ -106,11 +125,22 @@ def create_transaction(transaction: TransactionCreate):
 # -----------------------------
 
 @app.get("/api/transactions/{transaction_id}/retries")
-def list_payment_retries(transaction_id: str):
-    retries = get_retry_history(transaction_id)
+def list_payment_retries(
+    transaction_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    retries = get_retry_history(transaction_id, page, limit)
     if retries is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve payment retries")
-    return {"data": retries}
+    total = count_retry_history(transaction_id)
+    return {
+        "data": retries,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 @app.post("/api/transactions/{transaction_id}/retries")
@@ -138,11 +168,21 @@ def create_payment_retry(transaction_id: str, retry: PaymentRetryCreate):
 # -----------------------------
 
 @app.get("/api/payment-lifecycle")
-def get_payment_lifecycle_data():
-    lifecycle = get_payment_lifecycle()
+def get_payment_lifecycle_data(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    lifecycle = get_payment_lifecycle(page, limit)
     if lifecycle is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve payment lifecycle")
-    return {"data": lifecycle}
+    total = count_payment_lifecycle()
+    return {
+        "data": lifecycle,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 # -----------------------------
@@ -150,27 +190,57 @@ def get_payment_lifecycle_data():
 # -----------------------------
 
 @app.get("/api/bank-response-codes")
-def list_bank_response_codes():
-    codes = get_bank_response_codes()
+def list_bank_response_codes(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    codes = get_bank_response_codes(page, limit)
     if codes is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve bank response codes")
-    return {"data": codes}
+    total = count_bank_response_codes()
+    return {
+        "data": codes,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 @app.get("/api/bank-response-codes/temporary")
-def list_temporary_failures():
-    failures = get_temporary_failures()
+def list_temporary_failures(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    failures = get_temporary_failures(page, limit)
     if failures is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve temporary failures")
-    return {"data": failures}
+    total = count_temporary_failures()
+    return {
+        "data": failures,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 @app.get("/api/bank-response-codes/permanent")
-def list_permanent_failures():
-    failures = get_permanent_failures()
+def list_permanent_failures(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    failures = get_permanent_failures(page, limit)
     if failures is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve permanent failures")
-    return {"data": failures}
+    total = count_permanent_failures()
+    return {
+        "data": failures,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 @app.post("/api/bank-response-codes")
@@ -216,19 +286,39 @@ def get_analytics_overview():
 
 
 @app.get("/api/analytics/failure-classifications")
-def get_failure_classifications_data():
-    classifications = get_failure_classifications()
+def get_failure_classifications_data(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    classifications = get_failure_classifications(page, limit)
     if classifications is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve failure classifications")
-    return {"data": classifications}
+    total = count_failure_classifications()
+    return {
+        "data": classifications,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 @app.get("/api/analytics/response-code-analysis")
-def get_response_code_analysis_data():
-    analysis = get_response_code_analysis()
+def get_response_code_analysis_data(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page")
+):
+    analysis = get_response_code_analysis(page, limit)
     if analysis is None:
         raise HTTPException(status_code=500, detail="Failed to retrieve response code analysis")
-    return {"data": analysis}
+    total = count_response_code_analysis()
+    return {
+        "data": analysis,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 
 # -----------------------------
@@ -242,3 +332,4 @@ def read_root():
         "version": "1.0",
         "docs": "/docs"
     }
+
