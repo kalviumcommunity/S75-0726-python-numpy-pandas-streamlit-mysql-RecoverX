@@ -1,8 +1,9 @@
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, condecimal
 from typing import List, Optional
 from datetime import datetime
+from enum import Enum
 from src.db import execute_query, execute_many
 from src.payment_queries import (
     get_all_transactions,
@@ -35,35 +36,56 @@ app = FastAPI(title="RecoverX Data Integration API", version="1.0")
 # Pydantic Models
 # -----------------------------
 
+class FailureType(str, Enum):
+    TEMPORARY = "TEMPORARY"
+    PERMANENT = "PERMANENT"
+
+
+class Severity(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
 class TransactionCreate(BaseModel):
-    transaction_id: str
-    customer_id: str
-    amount: float
-    currency: str = "USD"
-    payment_method: str = ""
-    gateway: str = ""
-    initial_status: str
-    final_status: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    """Request model for creating a transaction.
+    Validates required transaction fields and types against the transactions table schema.
+    """
+    transaction_id: str = Field(..., max_length=100, description="Unique transaction identifier")
+    customer_id: str = Field(..., max_length=100, description="Customer identifier")
+    amount: condecimal(max_digits=15, decimal_places=2, gt=0) = Field(..., description="Transaction amount")
+    currency: str = Field("USD", max_length=10, description="Currency code")
+    payment_method: Optional[str] = Field(None, max_length=100, description="Payment method used")
+    gateway: Optional[str] = Field(None, max_length=100, description="Payment gateway used")
+    initial_status: str = Field(..., max_length=50, description="Initial transaction status")
+    final_status: Optional[str] = Field(None, max_length=50, description="Final transaction status")
+    created_at: datetime = Field(..., description="Transaction creation time")
+    updated_at: Optional[datetime] = Field(None, description="Last update time")
 
 
 class PaymentRetryCreate(BaseModel):
-    transaction_id: str
-    attempt_number: int
-    retry_timestamp: datetime
-    retry_status: str
-    response_code: Optional[str] = ""
-    response_message: Optional[str] = ""
+    """Request model for creating a payment retry entry.
+    Validates retry attempt payload based on the payment_retries schema.
+    """
+    transaction_id: str = Field(..., max_length=100, description="Associated transaction identifier")
+    attempt_number: int = Field(..., gt=0, description="Retry attempt number")
+    retry_timestamp: datetime = Field(..., description="Time of retry attempt")
+    retry_status: str = Field(..., max_length=50, description="Retry status")
+    response_code: Optional[str] = Field(None, max_length=50, description="Bank response code")
+    response_message: Optional[str] = Field(None, description="Bank response message")
 
 
 class BankResponseCodeCreate(BaseModel):
-    response_code: str
-    bank_name: Optional[str] = ""
-    description: str
-    failure_type: str
-    recovery_potential: Optional[float] = 0.0
-    recommended_action: Optional[str] = ""
+    """Request model for creating a bank response code lookup entry.
+    Validates bank response code payload against bank_response_codes schema.
+    """
+    response_code: str = Field(..., max_length=50, description="Bank response code")
+    bank_name: Optional[str] = Field(None, max_length=100, description="Issuing bank name")
+    description: str = Field(..., description="Description of the response code")
+    failure_type: FailureType = Field(..., description="Failure classification type")
+    recovery_potential: Optional[condecimal(max_digits=3, decimal_places=2, ge=0, le=1)] = Field(None, description="Recovery potential score")
+    recommended_action: Optional[str] = Field(None, description="Recommended action for this response code")
 
 
 # -----------------------------
