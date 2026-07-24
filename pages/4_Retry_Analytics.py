@@ -27,6 +27,6 @@ st.divider()
 # --- Chart ---
 st.subheader("Retry Attempts Distribution")
 fig = placeholder_retry_attempts()
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 render_footer()

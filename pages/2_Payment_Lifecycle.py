@@ -46,7 +46,7 @@ with chart_col1:
                      color_discrete_sequence=["#16a34a", "#dc2626"],
                      labels={"date": "Date", "value": "Count", "variable": "Status"})
         fig.update_layout(height=350, margin={"l": 0, "r": 0, "t": 30, "b": 0})
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No transaction status data available yet.")
 
@@ -64,7 +64,7 @@ with chart_col2:
         fig = px.bar(retry_counts, x="Attempts", y="Transactions", color="Attempts", 
                      color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1", "#0c4a6e"])
         fig.update_layout(height=350, margin={"l": 0, "r": 0, "t": 30, "b": 0}, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No retry attempts data available yet.")
 
@@ -96,7 +96,7 @@ total_transactions = count_filtered_transactions(
 
 if transactions:
     df_transactions = pd.DataFrame(transactions)
-    st.dataframe(df_transactions, use_container_width=True)
+    st.dataframe(df_transactions, width='stretch')
     
     # Show transaction details on select
     selected_txn = st.selectbox(
@@ -179,12 +179,12 @@ if transactions:
             ),
             showlegend=False
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         # Display dataframe
         st.subheader("Details")
         if retries:
-            st.dataframe(df_retries, use_container_width=True)
+            st.dataframe(df_retries, width='stretch')
         else:
             st.info("No retry attempts found for this transaction.")
 else:

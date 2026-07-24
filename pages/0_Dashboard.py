@@ -36,7 +36,7 @@ with chart_col1:
     df_line = pd.DataFrame({"Date": date_ranges, "Transactions": tx_counts})
     fig = px.line(df_line, x="Date", y="Transactions", markers=True, color_discrete_sequence=["#2563eb"])
     fig.update_layout(height=300, margin={"l": 0, "r": 0, "t": 30, "b": 0})
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 with chart_col2:
     st.subheader("Payment Methods")
@@ -46,7 +46,7 @@ with chart_col2:
     fig = px.bar(df_bar, x="Payment Method", y="Amount ($)", color="Payment Method", 
                  color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1"])
     fig.update_layout(height=300, margin={"l": 0, "r": 0, "t": 30, "b": 0}, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 # --- Recent Transactions Table ---
 st.markdown("---")
@@ -68,6 +68,6 @@ def highlight_status(val):
         return "color: #dc2626; font-weight: bold"
     else:
         return "color: #ca8a04; font-weight: bold"
-st.dataframe(df_recent.style.map(highlight_status, subset=["Status"]), use_container_width=True)
+st.dataframe(df_recent.style.map(highlight_status, subset=["Status"]), width='stretch')
 
 render_footer()
