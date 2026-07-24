@@ -39,7 +39,7 @@ chart_col1, chart_col2 = st.columns([3, 2])
 
 with chart_col1:
     st.subheader("Transaction Status Over Time")
-    status_over_time = get_transaction_status_over_time()
+    status_over_time = get_transaction_status_over_time() or []
     if status_over_time:
         df_status = pd.DataFrame(status_over_time)
         fig = px.line(df_status, x="date", y=["success_count", "failed_count"], markers=True, 
@@ -52,7 +52,7 @@ with chart_col1:
 
 with chart_col2:
     st.subheader("Retry Attempts Distribution")
-    retry_dist_data = get_retry_attempts_distribution()
+    retry_dist_data = get_retry_attempts_distribution() or []
     if retry_dist_data:
         df_retry = pd.DataFrame(retry_dist_data)
         df_retry["attempt_category"] = df_retry["attempt_count"].apply(lambda x: "4+" if x >=4 else str(x))
@@ -79,23 +79,28 @@ start_date_str = str(start_date_filter) if start_date_filter else None
 end_date_str = str(end_date_filter) + " 23:59:59" if end_date_filter else None
 
 # Get data
-transactions = get_filtered_transactions(
-    transaction_id=transaction_id_filter,
-    customer_id=customer_id_filter,
-    start_date=start_date_str,
-    end_date=end_date_str,
-    status=status_query
-)
-total_transactions = count_filtered_transactions(
-    transaction_id=transaction_id_filter,
-    customer_id=customer_id_filter,
-    start_date=start_date_str,
-    end_date=end_date_str,
-    status=status_query
-)
+try:
+    transactions = get_filtered_transactions(
+        transaction_id=transaction_id_filter,
+        customer_id=customer_id_filter,
+        start_date=start_date_str,
+        end_date=end_date_str,
+        status=status_query
+    )
+    total_transactions = count_filtered_transactions(
+        transaction_id=transaction_id_filter,
+        customer_id=customer_id_filter,
+        start_date=start_date_str,
+        end_date=end_date_str,
+        status=status_query
+    )
+except Exception as error:
+    st.error(f"Unable to load transactions from the database: {error}")
+    transactions = pd.DataFrame()
+    total_transactions = 0
 
-if transactions:
-    df_transactions = pd.DataFrame(transactions)
+if not transactions.empty:
+    df_transactions = transactions
     st.dataframe(df_transactions, width='stretch')
     
     # Show transaction details on select
@@ -106,7 +111,11 @@ if transactions:
     
     if selected_txn:
         st.markdown(f"### Transaction Lifecycle: {selected_txn}")
-        retries = get_retry_history(selected_txn)
+        try:
+            retries = get_retry_history(selected_txn)
+        except Exception as error:
+            st.error(f"Unable to load retry history: {error}")
+            retries = pd.DataFrame()
         
         # Get selected transaction's created_at
         txn_data = df_transactions[df_transactions["transaction_id"] == selected_txn].iloc[0]
@@ -121,8 +130,8 @@ if transactions:
             "type": "transaction"
         })
         # Add retries
-        if retries:
-            df_retries = pd.DataFrame(retries)
+        if not retries.empty:
+            df_retries = retries
             for _, retry in df_retries.iterrows():
                 timeline_data.append({
                     "event": f"Retry Attempt {retry['attempt_number']}",
@@ -183,7 +192,7 @@ if transactions:
         
         # Display dataframe
         st.subheader("Details")
-        if retries:
+        if not retries.empty:
             st.dataframe(df_retries, width='stretch')
         else:
             st.info("No retry attempts found for this transaction.")
