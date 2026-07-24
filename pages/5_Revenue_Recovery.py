@@ -29,6 +29,6 @@ st.divider()
 # --- Chart ---
 st.subheader("Revenue Recovery Trend")
 fig = placeholder_revenue_recovery()
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 render_footer()

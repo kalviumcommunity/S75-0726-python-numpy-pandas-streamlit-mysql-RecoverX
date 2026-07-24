@@ -57,7 +57,7 @@ def render_header():
         """
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
             <div>
-                <h1 style="margin:0; font-size: 1.5rem; color: #0f172a;">RecoverX - Payment Analytics Dashboard</h1>
+                <h1 style="margin:0; font-size: 1.5rem; color: #2563eb;">RecoverX - Payment Analytics Dashboard</h1>
             </div>
         </div>
         """,
