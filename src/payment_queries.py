@@ -1,5 +1,12 @@
 
+import pandas as pd
+
 from src.db import execute_query
+
+
+def _get_total(query, params=None):
+    result = execute_query(query, params, fetch=True)
+    return result[0]["total"] if result else 0
 
 
 # -----------------------------
@@ -21,7 +28,7 @@ def count_all_transactions():
     SELECT COUNT(*) AS total
     FROM transactions;
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 def get_transaction_by_id(transaction_id):
@@ -38,15 +45,20 @@ def get_transaction_by_id(transaction_id):
 # -----------------------------
 
 def get_retry_history(transaction_id, page=1, limit=10):
-    offset = (page - 1) * limit
+    offset = (page - 1) * limit if limit is not None else 0
     query = """
     SELECT *
     FROM payment_retries
     WHERE transaction_id = %s
     ORDER BY attempt_number
-    LIMIT %s OFFSET %s;
     """
-    return execute_query(query, (transaction_id, limit, offset), fetch=True)
+    if limit is not None:
+        query += " LIMIT %s OFFSET %s"
+        params = (transaction_id, limit, offset)
+    else:
+        params = (transaction_id,)
+    rows = execute_query(query, params, fetch=True)
+    return pd.DataFrame(rows or [])
 
 def count_retry_history(transaction_id):
     query = """
@@ -54,7 +66,7 @@ def count_retry_history(transaction_id):
     FROM payment_retries
     WHERE transaction_id = %s;
     """
-    return execute_query(query, (transaction_id,), fetch=True)[0]["total"]
+    return _get_total(query, (transaction_id,))
 
 
 # -----------------------------
@@ -89,7 +101,7 @@ def count_payment_lifecycle():
     JOIN payment_retries r
         ON t.transaction_id = r.transaction_id;
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 # -----------------------------
@@ -110,7 +122,7 @@ def count_bank_response_codes():
     SELECT COUNT(*) AS total
     FROM bank_response_codes;
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 def get_temporary_failures(page=1, limit=10):
@@ -129,7 +141,7 @@ def count_temporary_failures():
     FROM bank_response_codes
     WHERE failure_type='TEMPORARY';
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 def get_permanent_failures(page=1, limit=10):
@@ -148,7 +160,7 @@ def count_permanent_failures():
     FROM bank_response_codes
     WHERE failure_type='PERMANENT';
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 # -----------------------------
@@ -169,7 +181,7 @@ def count_failure_classifications():
     SELECT COUNT(*) AS total
     FROM failure_classifications;
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 # -----------------------------
@@ -199,7 +211,7 @@ def count_response_code_analysis():
     JOIN bank_response_codes b
         ON r.response_code = b.response_code;
     """
-    return execute_query(query, fetch=True)[0]["total"]
+    return _get_total(query)
 
 
 # -----------------------------
@@ -241,7 +253,7 @@ def get_filtered_transactions(
     page: int = 1,
     limit: int = 10
 ):
-    offset = (page - 1) * limit
+    offset = (page - 1) * limit if limit is not None else 0
     query = "SELECT * FROM transactions WHERE 1=1"
     params = []
     
@@ -261,10 +273,13 @@ def get_filtered_transactions(
         query += " AND final_status = %s"
         params.append(status)
     
-    query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
-    params.extend([limit, offset])
+    query += " ORDER BY created_at DESC"
+    if limit is not None:
+        query += " LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
     
-    return execute_query(query, tuple(params), fetch=True)
+    rows = execute_query(query, tuple(params), fetch=True)
+    return pd.DataFrame(rows or [])
 
 
 def count_filtered_transactions(
@@ -293,7 +308,7 @@ def count_filtered_transactions(
         query += " AND final_status = %s"
         params.append(status)
     
-    return execute_query(query, tuple(params), fetch=True)[0]["total"]
+    return _get_total(query, tuple(params))
 
 
 def get_transaction_status_over_time():
@@ -319,4 +334,27 @@ def get_retry_attempts_distribution():
     GROUP BY t.transaction_id
     """
     return execute_query(query, fetch=True)
+
+
+def get_transactions(
+    transaction_id=None,
+    customer_id=None,
+    start_date=None,
+    end_date=None,
+    status=None,
+):
+    """Return all matching transactions as a DataFrame for Streamlit consumers."""
+    return get_filtered_transactions(
+        transaction_id=transaction_id,
+        customer_id=customer_id,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+        limit=None,
+    )
+
+
+def get_payment_retries(transaction_id):
+    """Return all retry attempts for one transaction as a DataFrame."""
+    return get_retry_history(transaction_id, limit=None)
 
