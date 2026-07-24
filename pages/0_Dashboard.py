@@ -5,6 +5,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import io
 from src.ui_components import setup_page, render_header, render_sidebar, render_footer
 from src.payment_queries import get_total_transactions, get_successful_transactions, get_failed_transactions
 
@@ -69,5 +70,30 @@ def highlight_status(val):
     else:
         return "color: #ca8a04; font-weight: bold"
 st.dataframe(df_recent.style.map(highlight_status, subset=["Status"]), width='stretch')
+
+# --- Export Section ---
+st.markdown("---")
+st.subheader("Export Transactions")
+col1, col2 = st.columns(2)
+with col1:
+    csv_buffer = io.StringIO()
+    df_recent.to_csv(csv_buffer, index=False)
+    st.download_button(
+        label="📥 Export as CSV",
+        data=csv_buffer.getvalue(),
+        file_name="recent_transactions.csv",
+        mime="text/csv"
+    )
+
+with col2:
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        df_recent.to_excel(writer, index=False, sheet_name="Recent Transactions")
+    st.download_button(
+        label="📥 Export as Excel",
+        data=excel_buffer.getvalue(),
+        file_name="recent_transactions.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 render_footer()

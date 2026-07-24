@@ -7,7 +7,7 @@ from fastapi import (
     UploadFile,
     File,
 )
-
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, condecimal
 from typing import List, Optional
 from datetime import datetime
@@ -17,6 +17,7 @@ from fastapi.security import APIKeyHeader
 import os
 import pandas as pd
 import json
+import io
 
 from dotenv import load_dotenv
 from io import StringIO
@@ -135,6 +136,51 @@ def create_transaction(
         "message": "Transaction created successfully",
         "data": txn_dict
     }
+
+
+@app.get("/api/transactions/export/csv")
+def export_transactions_csv(api_key: str = Depends(verify_api_key)):
+    """Export all transactions as CSV."""
+    # Convert transactions to DataFrame
+    all_transactions = list(transactions_db.values())
+    df = pd.DataFrame(all_transactions)
+    
+    # Create CSV in memory
+    output = StringIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+    
+    # Return as StreamingResponse
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=transactions.csv"
+        }
+    )
+
+
+@app.get("/api/transactions/export/excel")
+def export_transactions_excel(api_key: str = Depends(verify_api_key)):
+    """Export all transactions as Excel."""
+    # Convert transactions to DataFrame
+    all_transactions = list(transactions_db.values())
+    df = pd.DataFrame(all_transactions)
+    
+    # Create Excel file in memory
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Transactions")
+    output.seek(0)
+    
+    # Return as StreamingResponse
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": "attachment; filename=transactions.xlsx"
+        }
+    )
 
 
 # -----------------------------
