@@ -231,3 +231,92 @@ def get_failed_transactions():
     """
     return execute_query(query, fetch=True)
 
+
+def get_filtered_transactions(
+    transaction_id: str = None,
+    customer_id: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    status: str = None,
+    page: int = 1,
+    limit: int = 10
+):
+    offset = (page - 1) * limit
+    query = "SELECT * FROM transactions WHERE 1=1"
+    params = []
+    
+    if transaction_id:
+        query += " AND transaction_id LIKE %s"
+        params.append(f"%{transaction_id}%")
+    if customer_id:
+        query += " AND customer_id LIKE %s"
+        params.append(f"%{customer_id}%")
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+    if status:
+        query += " AND final_status = %s"
+        params.append(status)
+    
+    query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+    
+    return execute_query(query, tuple(params), fetch=True)
+
+
+def count_filtered_transactions(
+    transaction_id: str = None,
+    customer_id: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    status: str = None
+):
+    query = "SELECT COUNT(*) AS total FROM transactions WHERE 1=1"
+    params = []
+    
+    if transaction_id:
+        query += " AND transaction_id LIKE %s"
+        params.append(f"%{transaction_id}%")
+    if customer_id:
+        query += " AND customer_id LIKE %s"
+        params.append(f"%{customer_id}%")
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+    if status:
+        query += " AND final_status = %s"
+        params.append(status)
+    
+    return execute_query(query, tuple(params), fetch=True)[0]["total"]
+
+
+def get_transaction_status_over_time():
+    query = """
+    SELECT 
+        DATE(created_at) AS date,
+        SUM(CASE WHEN final_status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count,
+        SUM(CASE WHEN final_status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count
+    FROM transactions
+    GROUP BY DATE(created_at)
+    ORDER BY date
+    """
+    return execute_query(query, fetch=True)
+
+
+def get_retry_attempts_distribution():
+    query = """
+    SELECT 
+        t.transaction_id,
+        COUNT(pr.retry_id) AS attempt_count
+    FROM transactions t
+    LEFT JOIN payment_retries pr ON t.transaction_id = pr.transaction_id
+    GROUP BY t.transaction_id
+    """
+    return execute_query(query, fetch=True)
+
