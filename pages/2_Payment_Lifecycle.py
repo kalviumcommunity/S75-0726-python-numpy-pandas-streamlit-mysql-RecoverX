@@ -6,6 +6,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from src.ui_components import setup_page, render_header, render_sidebar, render_footer
 from src.payment_queries import (
     get_filtered_transactions,
@@ -106,8 +107,83 @@ if transactions:
     if selected_txn:
         st.markdown(f"### Transaction Lifecycle: {selected_txn}")
         retries = get_retry_history(selected_txn)
+        
+        # Get selected transaction's created_at
+        txn_data = df_transactions[df_transactions["transaction_id"] == selected_txn].iloc[0]
+        
+        # Prepare timeline data
+        timeline_data = []
+        # Initial transaction
+        timeline_data.append({
+            "event": "Initial Transaction",
+            "timestamp": pd.to_datetime(txn_data["created_at"]),
+            "status": txn_data["initial_status"],
+            "type": "transaction"
+        })
+        # Add retries
         if retries:
             df_retries = pd.DataFrame(retries)
+            for _, retry in df_retries.iterrows():
+                timeline_data.append({
+                    "event": f"Retry Attempt {retry['attempt_number']}",
+                    "timestamp": pd.to_datetime(retry["retry_timestamp"]),
+                    "status": retry["retry_status"],
+                    "type": "retry"
+                })
+        df_timeline = pd.DataFrame(timeline_data)
+        df_timeline = df_timeline.sort_values("timestamp").reset_index(drop=True)
+        
+        # Display visual timeline
+        st.subheader("Timeline")
+        # Create color mapping for status
+        color_map = {"SUCCESS": "#16a34a", "FAILED": "#dc2626"}
+        df_timeline["color"] = df_timeline["status"].map(lambda x: color_map.get(x, "#6b7280"))
+        
+        fig = go.Figure()
+        for idx, row in df_timeline.iterrows():
+            fig.add_trace(go.Scatter(
+                x=[row["timestamp"]],
+                y=[idx],
+                mode="markers+text",
+                marker=dict(size=15, color=row["color"]),
+                text=[row["event"]],
+                textposition="top center",
+                name=row["event"],
+                hovertemplate="<b>%{text}</b><br>Timestamp: %{x}<br>Status: %{customdata[0]}<extra></extra>",
+                customdata=[[row["status"]]]
+            ))
+        
+        # Add connecting lines
+        if len(df_timeline) > 1:
+            for i in range(1, len(df_timeline)):
+                fig.add_trace(go.Scatter(
+                    x=[df_timeline["timestamp"].iloc[i-1], df_timeline["timestamp"].iloc[i]],
+                    y=[i-1, i],
+                    mode="lines",
+                    line=dict(color="#94a3b8", dash="dash"),
+                    showlegend=False
+                ))
+        
+        fig.update_layout(
+            height=200 + (len(df_timeline)*30),
+            margin={"l": 20, "r": 20, "t": 30, "b": 20},
+            yaxis=dict(
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False
+            ),
+            xaxis=dict(
+                title="Timestamp",
+                showgrid=True,
+                zeroline=False
+            ),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Display dataframe
+        st.subheader("Details")
+        if retries:
             st.dataframe(df_retries, use_container_width=True)
         else:
             st.info("No retry attempts found for this transaction.")
