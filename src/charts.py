@@ -153,3 +153,102 @@ def failure_type_distribution_chart(distribution=None):
         ],
     )
     return fig
+
+
+def failure_breakdown_by_response_code_chart(data=None):
+    if not data:
+        return placeholder_response_code_distribution()
+
+    df = pd.DataFrame(data)
+    if df.empty:
+        return placeholder_response_code_distribution()
+
+    df["label"] = df.apply(lambda r: f"{r['code']} - {r['description']}", axis=1)
+    fig = px.bar(
+        df,
+        x="label",
+        y="count",
+        color="code",
+        color_discrete_sequence=px.colors.qualitative.Set2,
+    )
+    fig.update_layout(
+        height=350,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis_tickangle=-45,
+        xaxis_title=None,
+        yaxis_title="Failures",
+        showlegend=False,
+    )
+    return fig
+
+
+def failure_breakdown_by_gateway_chart(data=None):
+    if not data:
+        gateways = ["Stripe", "Razorpay", "PayU", "PayPal"]
+        counts = [40, 30, 20, 10]
+        df = pd.DataFrame({"Gateway": gateways, "Count": counts})
+    else:
+        df = pd.DataFrame(data)
+        if df.empty:
+            gateways = ["Stripe", "Razorpay", "PayU", "PayPal"]
+            counts = [40, 30, 20, 10]
+            df = pd.DataFrame({"Gateway": gateways, "Count": counts})
+        else:
+            df = df.rename(columns={"gateway": "Gateway", "count": "Count"})
+
+    fig = px.pie(
+        df,
+        values="Count",
+        names="Gateway",
+        color_discrete_sequence=px.colors.sequential.Reds,
+        hole=0.4,
+    )
+    fig.update_traces(
+        textinfo="percent+label",
+        textfont_size=12,
+        marker=dict(line=dict(color="#ffffff", width=2)),
+    )
+    fig.update_layout(
+        height=350,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.1,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+    return fig
+
+
+def failure_breakdown_by_payment_method_chart(data=None):
+    if not data:
+        methods = ["Credit Card", "Debit Card", "UPI", "Net Banking"]
+        counts = [45, 25, 20, 10]
+        df = pd.DataFrame({"Payment Method": methods, "Count": counts})
+    else:
+        df = pd.DataFrame(data)
+        if df.empty:
+            methods = ["Credit Card", "Debit Card", "UPI", "Net Banking"]
+            counts = [45, 25, 20, 10]
+            df = pd.DataFrame({"Payment Method": methods, "Count": counts})
+        else:
+            df = df.rename(columns={"payment_method": "Payment Method", "count": "Count"})
+
+    fig = px.bar(
+        df,
+        x="Payment Method",
+        y="Count",
+        color="Payment Method",
+        color_discrete_sequence=["#dc2626", "#ef4444", "#f87171", "#fca5a5"],
+    )
+    fig.update_layout(
+        height=350,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis_title=None,
+        yaxis_title="Failures",
+        showlegend=False,
+    )
+    return fig
