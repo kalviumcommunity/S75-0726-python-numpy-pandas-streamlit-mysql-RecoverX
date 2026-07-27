@@ -74,181 +74,142 @@ def placeholder_response_code_distribution():
 
 
 def failure_type_distribution_chart(distribution=None):
-    """
-    Chart for failure distribution by type (TEMPORARY vs PERMANENT).
 
-    Parameters
-    ----------
-    distribution : list of dict, optional
-        Each dict has keys "failure_type" and "count".
-        If None or empty, placeholder values are used.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        A donut-style pie chart showing TEMPORARY vs PERMANENT split.
-    """
     if distribution:
-        temp_count = 0
-        perm_count = 0
-        for row in distribution:
-            ftype = str(row.get("failure_type", "")).upper()
-            cnt = int(row.get("count", 0) or 0)
-            if ftype == "TEMPORARY":
-                temp_count += cnt
-            elif ftype == "PERMANENT":
-                perm_count += cnt
-    else:
-        temp_count = 62
-        perm_count = 38
+        temp = sum(
+            int(row.get("count", 0))
+            for row in distribution
+            if str(row.get("failure_type")).upper() == "TEMPORARY"
+        )
 
-    total = temp_count + perm_count
+        perm = sum(
+            int(row.get("count", 0))
+            for row in distribution
+            if str(row.get("failure_type")).upper() == "PERMANENT"
+        )
+
+    else:
+        temp = 60
+        perm = 40
+
+    total = temp + perm
+
     if total == 0:
-        temp_count, perm_count = 1, 1
+        temp = 1
+        perm = 1
         total = 2
 
-    pct_temp = round(temp_count / total * 100, 1)
-    pct_perm = round(perm_count / total * 100, 1)
-
-    df = pd.DataFrame({
-        "Failure Type": [
-            f"TEMPORARY  ({pct_temp}%)",
-            f"PERMANENT  ({pct_perm}%)",
-        ],
-        "Count": [temp_count, perm_count],
-    })
-
-    colors = ["#f59e0b", "#dc2626"]
     fig = px.pie(
-        df,
-        values="Count",
-        names="Failure Type",
-        color_discrete_sequence=colors,
+        names=["Temporary", "Permanent"],
+        values=[temp, perm],
         hole=0.45,
+        color=["Temporary", "Permanent"],
+        color_discrete_map={
+            "Temporary": "#f59e0b",
+            "Permanent": "#dc2626",
+        },
     )
+
     fig.update_traces(
         textinfo="percent+label",
-        textfont_size=13,
-        marker=dict(line=dict(color="#ffffff", width=2)),
+        marker=dict(line=dict(color="white", width=2))
     )
+
     fig.update_layout(
-        height=350,
-        margin={"l": 0, "r": 0, "t": 30, "b": 0},
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.1,
-            xanchor="center",
-            x=0.5,
-        ),
-        annotations=[
-            dict(
-                text=f"<b>{total}</b><br><span style='font-size:11px;color:#64748b'>Total Failures</span>",
-                x=0.5,
-                y=0.5,
-                font_size=16,
-                showarrow=False,
-            )
-        ],
+        height=380,
+        title="Failure Distribution",
+        margin=dict(l=0, r=0, t=50, b=0),
     )
+
     return fig
 
 
 def failure_breakdown_by_response_code_chart(data=None):
+
     if not data:
         return placeholder_response_code_distribution()
 
     df = pd.DataFrame(data)
+
     if df.empty:
         return placeholder_response_code_distribution()
 
-    df["label"] = df.apply(lambda r: f"{r['code']} - {r['description']}", axis=1)
+    df["Response"] = (
+        df["code"] + " - " + df["description"]
+    )
+
     fig = px.bar(
         df,
-        x="label",
+        x="Response",
         y="count",
-        color="code",
-        color_discrete_sequence=px.colors.qualitative.Set2,
+        color="count",
+        color_continuous_scale="Reds",
     )
+
     fig.update_layout(
-        height=350,
-        margin={"l": 0, "r": 0, "t": 30, "b": 0},
-        xaxis_tickangle=-45,
-        xaxis_title=None,
+        title="Failures by Response Code",
+        height=400,
+        xaxis_title="",
         yaxis_title="Failures",
-        showlegend=False,
     )
+
     return fig
 
 
 def failure_breakdown_by_gateway_chart(data=None):
+
     if not data:
-        gateways = ["Stripe", "Razorpay", "PayU", "PayPal"]
-        counts = [40, 30, 20, 10]
-        df = pd.DataFrame({"Gateway": gateways, "Count": counts})
-    else:
-        df = pd.DataFrame(data)
-        if df.empty:
-            gateways = ["Stripe", "Razorpay", "PayU", "PayPal"]
-            counts = [40, 30, 20, 10]
-            df = pd.DataFrame({"Gateway": gateways, "Count": counts})
-        else:
-            df = df.rename(columns={"gateway": "Gateway", "count": "Count"})
+        data = [
+            {"gateway": "Stripe", "count": 40},
+            {"gateway": "Razorpay", "count": 25},
+            {"gateway": "PayU", "count": 15},
+            {"gateway": "PayPal", "count": 20},
+        ]
+
+    df = pd.DataFrame(data)
 
     fig = px.pie(
         df,
-        values="Count",
-        names="Gateway",
-        color_discrete_sequence=px.colors.sequential.Reds,
+        names="gateway",
+        values="count",
         hole=0.4,
+        color_discrete_sequence=px.colors.sequential.Blues,
     )
-    fig.update_traces(
-        textinfo="percent+label",
-        textfont_size=12,
-        marker=dict(line=dict(color="#ffffff", width=2)),
-    )
+
     fig.update_layout(
-        height=350,
-        margin={"l": 0, "r": 0, "t": 30, "b": 0},
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.1,
-            xanchor="center",
-            x=0.5,
-        ),
+        title="Gateway Failure Distribution",
+        height=380,
     )
+
     return fig
 
 
 def failure_breakdown_by_payment_method_chart(data=None):
+
     if not data:
-        methods = ["Credit Card", "Debit Card", "UPI", "Net Banking"]
-        counts = [45, 25, 20, 10]
-        df = pd.DataFrame({"Payment Method": methods, "Count": counts})
-    else:
-        df = pd.DataFrame(data)
-        if df.empty:
-            methods = ["Credit Card", "Debit Card", "UPI", "Net Banking"]
-            counts = [45, 25, 20, 10]
-            df = pd.DataFrame({"Payment Method": methods, "Count": counts})
-        else:
-            df = df.rename(columns={"payment_method": "Payment Method", "count": "Count"})
+        data = [
+            {"payment_method": "Credit Card", "count": 45},
+            {"payment_method": "Debit Card", "count": 25},
+            {"payment_method": "UPI", "count": 20},
+            {"payment_method": "Wallet", "count": 10},
+        ]
+
+    df = pd.DataFrame(data)
 
     fig = px.bar(
         df,
-        x="Payment Method",
-        y="Count",
-        color="Payment Method",
-        color_discrete_sequence=["#dc2626", "#ef4444", "#f87171", "#fca5a5"],
+        x="payment_method",
+        y="count",
+        color="payment_method",
     )
+
     fig.update_layout(
-        height=350,
-        margin={"l": 0, "r": 0, "t": 30, "b": 0},
-        xaxis_title=None,
+        title="Payment Method Failures",
+        height=380,
+        xaxis_title="",
         yaxis_title="Failures",
         showlegend=False,
     )
+
     return fig
+
