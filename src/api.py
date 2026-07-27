@@ -1,3 +1,11 @@
+import os
+import json
+import pandas as pd
+
+from io import StringIO
+from datetime import datetime
+from typing import List, Optional
+
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -7,6 +15,9 @@ from fastapi import (
     UploadFile,
     File,
 )
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel
+
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, condecimal
 from typing import List, Optional
@@ -63,14 +74,14 @@ class FailureType(str, Enum):
 class TransactionCreate(BaseModel):
     transaction_id: str = Field(..., max_length=100)
     customer_id: str = Field(..., max_length=100)
-    amount: condecimal(max_digits=15, decimal_places=2, gt=0)
+    amount: float = Field(..., gt=0)
     currency: str = Field("USD", max_length=10)
     payment_method: Optional[str] = Field(None, max_length=100)
     gateway: Optional[str] = Field(None, max_length=100)
     initial_status: str = Field(..., max_length=50)
     final_status: Optional[str] = Field(None, max_length=50)
     created_at: datetime
-    updated_at: Optional[datetime] = Field(None)
+    updated_at: Optional[datetime] = None
 
 
 class PaymentRetryCreate(BaseModel):
@@ -87,8 +98,8 @@ class BankResponseCodeCreate(BaseModel):
     bank_name: Optional[str] = Field(None, max_length=100)
     description: str
     failure_type: FailureType
-    recovery_potential: Optional[condecimal(max_digits=3, decimal_places=2, ge=0, le=1)] = Field(None)
-    recommended_action: Optional[str] = Field(None)
+    recovery_potential: Optional[float] = Field(None, ge=0, le=1)
+    recommended_action: Optional[str] = None
 
 
 # -----------------------------

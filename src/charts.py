@@ -71,3 +71,145 @@ def placeholder_response_code_distribution():
                  color_discrete_sequence=px.colors.qualitative.Set2)
     fig.update_layout(height=350, margin={"l": 0, "r": 0, "t": 30, "b": 0}, xaxis_tickangle=-45)
     return fig
+
+
+def failure_type_distribution_chart(distribution=None):
+
+    if distribution:
+        temp = sum(
+            int(row.get("count", 0))
+            for row in distribution
+            if str(row.get("failure_type")).upper() == "TEMPORARY"
+        )
+
+        perm = sum(
+            int(row.get("count", 0))
+            for row in distribution
+            if str(row.get("failure_type")).upper() == "PERMANENT"
+        )
+
+    else:
+        temp = 60
+        perm = 40
+
+    total = temp + perm
+
+    if total == 0:
+        temp = 1
+        perm = 1
+        total = 2
+
+    fig = px.pie(
+        names=["Temporary", "Permanent"],
+        values=[temp, perm],
+        hole=0.45,
+        color=["Temporary", "Permanent"],
+        color_discrete_map={
+            "Temporary": "#f59e0b",
+            "Permanent": "#dc2626",
+        },
+    )
+
+    fig.update_traces(
+        textinfo="percent+label",
+        marker=dict(line=dict(color="white", width=2))
+    )
+
+    fig.update_layout(
+        height=380,
+        title="Failure Distribution",
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+
+    return fig
+
+
+def failure_breakdown_by_response_code_chart(data=None):
+
+    if not data:
+        return placeholder_response_code_distribution()
+
+    df = pd.DataFrame(data)
+
+    if df.empty:
+        return placeholder_response_code_distribution()
+
+    df["Response"] = (
+        df["code"] + " - " + df["description"]
+    )
+
+    fig = px.bar(
+        df,
+        x="Response",
+        y="count",
+        color="count",
+        color_continuous_scale="Reds",
+    )
+
+    fig.update_layout(
+        title="Failures by Response Code",
+        height=400,
+        xaxis_title="",
+        yaxis_title="Failures",
+    )
+
+    return fig
+
+
+def failure_breakdown_by_gateway_chart(data=None):
+
+    if not data:
+        data = [
+            {"gateway": "Stripe", "count": 40},
+            {"gateway": "Razorpay", "count": 25},
+            {"gateway": "PayU", "count": 15},
+            {"gateway": "PayPal", "count": 20},
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = px.pie(
+        df,
+        names="gateway",
+        values="count",
+        hole=0.4,
+        color_discrete_sequence=px.colors.sequential.Blues,
+    )
+
+    fig.update_layout(
+        title="Gateway Failure Distribution",
+        height=380,
+    )
+
+    return fig
+
+
+def failure_breakdown_by_payment_method_chart(data=None):
+
+    if not data:
+        data = [
+            {"payment_method": "Credit Card", "count": 45},
+            {"payment_method": "Debit Card", "count": 25},
+            {"payment_method": "UPI", "count": 20},
+            {"payment_method": "Wallet", "count": 10},
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = px.bar(
+        df,
+        x="payment_method",
+        y="count",
+        color="payment_method",
+    )
+
+    fig.update_layout(
+        title="Payment Method Failures",
+        height=380,
+        xaxis_title="",
+        yaxis_title="Failures",
+        showlegend=False,
+    )
+
+    return fig
+
