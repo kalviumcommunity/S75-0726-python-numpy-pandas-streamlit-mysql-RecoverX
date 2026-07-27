@@ -1,8 +1,12 @@
-
 import pandas as pd
 
 from src.db import execute_query
 
+def get_filtered_failed_transactions(
+    failure_type: str = None,
+    response_code: str = None,
+    gateway: str = None,
+    payment_method: str = None,
 
 def _get_total(query, params=None):
     result = execute_query(query, params, fetch=True)
@@ -312,77 +316,43 @@ def count_filtered_transactions(
     customer_id: str = None,
     start_date: str = None,
     end_date: str = None,
-    status: str = None
 ):
-    query = "SELECT COUNT(*) AS total FROM transactions WHERE 1=1"
-    params = []
-    
-    if transaction_id:
-        query += " AND transaction_id LIKE %s"
-        params.append(f"%{transaction_id}%")
-    if customer_id:
-        query += " AND customer_id LIKE %s"
-        params.append(f"%{customer_id}%")
-    if start_date:
-        query += " AND created_at >= %s"
-        params.append(start_date)
-    if end_date:
-        query += " AND created_at <= %s"
-        params.append(end_date)
-    if status:
-        query += " AND final_status = %s"
-        params.append(status)
-    
-    return _get_total(query, tuple(params))
-
-
-def get_transaction_status_over_time():
     query = """
-    SELECT 
-        DATE(created_at) AS date,
-        SUM(CASE WHEN final_status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count,
-        SUM(CASE WHEN final_status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count
-    FROM transactions
-    GROUP BY DATE(created_at)
-    ORDER BY date
-    """
-    return execute_query(query, fetch=True)
-
-
-def get_retry_attempts_distribution():
-    query = """
-    SELECT 
-        t.transaction_id,
-        COUNT(pr.retry_id) AS attempt_count
+    SELECT DISTINCT
+        t.transaction_id, t.customer_id, t.amount, t.currency,
+        t.payment_method, t.gateway, t.final_status, t.created_at,
+        pr.response_code,
+        COALESCE(fc.failure_type, brc.failure_type) AS failure_type,
+        COALESCE(brc.description, fc.root_cause) AS failure_description
     FROM transactions t
     LEFT JOIN payment_retries pr ON t.transaction_id = pr.transaction_id
-    GROUP BY t.transaction_id
+    LEFT JOIN bank_response_codes brc ON pr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc ON t.transaction_id = fc.transaction_id
+    WHERE t.final_status != 'SUCCESS'
     """
-    return execute_query(query, fetch=True)
+    params = []
+    if failure_type:
+        query += " AND COALESCE(fc.failure_type, brc.failure_type) = %s"
+        params.append(failure_type)
+    if response_code:
+        query += " AND pr.response_code = %s"
+        params.append(response_code)
+    if gateway:
+        query += " AND t.gateway = %s"
+        params.append(gateway)
+    if payment_method:
+        query += " AND t.payment_method = %s"
+        params.append(payment_method)
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
 
-
-def get_transactions(
-    transaction_id=None,
-    customer_id=None,
-    start_date=None,
-    end_date=None,
-    status=None,
-):
-    """Return all matching transactions as a DataFrame for Streamlit consumers."""
-    return get_filtered_transactions(
-        transaction_id=transaction_id,
-        customer_id=customer_id,
-        start_date=start_date,
-        end_date=end_date,
-        status=status,
-        limit=None,
-    )
-
-
-def get_payment_retries(transaction_id):
-    """Return all retry attempts for one transaction as a DataFrame."""
-    return get_retry_history(transaction_id, limit=None)
-
+    query += " ORDER BY t.created_at DESC"
+    rows = execute_query(query, tuple(params), fetch=True)
+    return pd.DataFrame(rows or [])
 
 def get_failure_breakdown_by_response_code():
     query = """
