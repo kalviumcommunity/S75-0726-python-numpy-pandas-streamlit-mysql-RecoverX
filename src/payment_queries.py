@@ -163,6 +163,31 @@ def count_permanent_failures():
     return _get_total(query)
 
 
+def get_failure_type_distribution():
+    """
+    Return the count of failures grouped by failure_type (TEMPORARY vs PERMANENT)
+    from the failure_classifications table. Returns a list of dicts with keys:
+    failure_type, count.
+    """
+    query = """
+    SELECT
+        failure_type,
+        COUNT(*) AS count
+    FROM failure_classifications
+    GROUP BY failure_type
+    ORDER BY failure_type;
+    """
+    result = execute_query(query, fetch=True)
+    if not result:
+        temp_count = count_temporary_failures()
+        perm_count = count_permanent_failures()
+        return [
+            {"failure_type": "TEMPORARY", "count": temp_count or 0},
+            {"failure_type": "PERMANENT", "count": perm_count or 0},
+        ]
+    return result
+
+
 # -----------------------------
 # Failure Classification
 # -----------------------------
