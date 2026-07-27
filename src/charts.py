@@ -71,3 +71,85 @@ def placeholder_response_code_distribution():
                  color_discrete_sequence=px.colors.qualitative.Set2)
     fig.update_layout(height=350, margin={"l": 0, "r": 0, "t": 30, "b": 0}, xaxis_tickangle=-45)
     return fig
+
+
+def failure_type_distribution_chart(distribution=None):
+    """
+    Chart for failure distribution by type (TEMPORARY vs PERMANENT).
+
+    Parameters
+    ----------
+    distribution : list of dict, optional
+        Each dict has keys "failure_type" and "count".
+        If None or empty, placeholder values are used.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        A donut-style pie chart showing TEMPORARY vs PERMANENT split.
+    """
+    if distribution:
+        temp_count = 0
+        perm_count = 0
+        for row in distribution:
+            ftype = str(row.get("failure_type", "")).upper()
+            cnt = int(row.get("count", 0) or 0)
+            if ftype == "TEMPORARY":
+                temp_count += cnt
+            elif ftype == "PERMANENT":
+                perm_count += cnt
+    else:
+        temp_count = 62
+        perm_count = 38
+
+    total = temp_count + perm_count
+    if total == 0:
+        temp_count, perm_count = 1, 1
+        total = 2
+
+    pct_temp = round(temp_count / total * 100, 1)
+    pct_perm = round(perm_count / total * 100, 1)
+
+    df = pd.DataFrame({
+        "Failure Type": [
+            f"TEMPORARY  ({pct_temp}%)",
+            f"PERMANENT  ({pct_perm}%)",
+        ],
+        "Count": [temp_count, perm_count],
+    })
+
+    colors = ["#f59e0b", "#dc2626"]
+    fig = px.pie(
+        df,
+        values="Count",
+        names="Failure Type",
+        color_discrete_sequence=colors,
+        hole=0.45,
+    )
+    fig.update_traces(
+        textinfo="percent+label",
+        textfont_size=13,
+        marker=dict(line=dict(color="#ffffff", width=2)),
+    )
+    fig.update_layout(
+        height=350,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.1,
+            xanchor="center",
+            x=0.5,
+        ),
+        annotations=[
+            dict(
+                text=f"<b>{total}</b><br><span style='font-size:11px;color:#64748b'>Total Failures</span>",
+                x=0.5,
+                y=0.5,
+                font_size=16,
+                showarrow=False,
+            )
+        ],
+    )
+    return fig
