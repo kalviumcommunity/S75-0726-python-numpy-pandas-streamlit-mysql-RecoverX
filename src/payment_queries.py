@@ -383,3 +383,45 @@ def get_payment_retries(transaction_id):
     """Return all retry attempts for one transaction as a DataFrame."""
     return get_retry_history(transaction_id, limit=None)
 
+
+def get_failure_breakdown_by_response_code():
+    query = """
+    SELECT
+        pr.response_code AS code,
+        COALESCE(brc.description, 'Unknown') AS description,
+        COUNT(*) AS count
+    FROM payment_retries pr
+    LEFT JOIN bank_response_codes brc
+        ON pr.response_code = brc.response_code
+    WHERE pr.retry_status = 'FAILED'
+    GROUP BY pr.response_code, brc.description
+    ORDER BY count DESC;
+    """
+    return execute_query(query, fetch=True)
+
+
+def get_failure_breakdown_by_gateway():
+    query = """
+    SELECT
+        COALESCE(gateway, 'Unknown') AS gateway,
+        COUNT(*) AS count
+    FROM transactions
+    WHERE final_status = 'FAILED'
+    GROUP BY gateway
+    ORDER BY count DESC;
+    """
+    return execute_query(query, fetch=True)
+
+
+def get_failure_breakdown_by_payment_method():
+    query = """
+    SELECT
+        COALESCE(payment_method, 'Unknown') AS payment_method,
+        COUNT(*) AS count
+    FROM transactions
+    WHERE final_status = 'FAILED'
+    GROUP BY payment_method
+    ORDER BY count DESC;
+    """
+    return execute_query(query, fetch=True)
+
