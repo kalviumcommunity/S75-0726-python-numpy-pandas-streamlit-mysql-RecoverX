@@ -213,3 +213,75 @@ def failure_breakdown_by_payment_method_chart(data=None):
 
     return fig
 
+
+def failure_causes_pie_chart(data=None):
+
+    if not data:
+        data = [
+            {"cause": "Insufficient Funds", "count": 40},
+            {"cause": "Do Not Honor", "count": 25},
+            {"cause": "Invalid Card", "count": 15},
+            {"cause": "Expired Card", "count": 12},
+            {"cause": "Network Error", "count": 8},
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = px.pie(
+        df,
+        names="cause",
+        values="count",
+        color_discrete_sequence=px.colors.sequential.Reds,
+    )
+
+    fig.update_traces(
+        textinfo="percent+label",
+        marker=dict(line=dict(color="white", width=2))
+    )
+
+    fig.update_layout(
+        title="Failure Causes (Pie)",
+        height=400,
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+
+    return fig
+
+
+def failure_causes_bar_chart(data=None):
+
+    if not data:
+        data = [
+            {"cause": "Insufficient Funds", "count": 40},
+            {"cause": "Do Not Honor", "count": 25},
+            {"cause": "Invalid Card", "count": 15},
+            {"cause": "Expired Card", "count": 12},
+            {"cause": "Network Error", "count": 8},
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = px.bar(
+        df,
+        x="cause",
+        y="count",
+        color="cause",
+        color_discrete_sequence=px.colors.qualitative.Set2,
+    )
+
+    fig.update_layout(
+        title="Failure Causes (Bar)",
+        height=400,
+        xaxis_title="Failure Cause",
+        yaxis_title="Number of Failures",
+        xaxis_tickangle=-30,
+        showlegend=False,
+    )
+
+    fig.update_traces(
+        texttemplate="%{y}",
+        textposition="outside",
+    )
+
+    return fig
+
