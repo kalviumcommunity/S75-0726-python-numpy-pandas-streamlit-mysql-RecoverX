@@ -5,9 +5,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
-from src.charts import placeholder_failure_distribution, placeholder_response_code_distribution
-from src.payment_queries import get_filtered_failed_transactions
 
 from src.ui_components import (
     setup_page,
@@ -24,6 +21,7 @@ from src.charts import (
 )
 
 from src.payment_queries import (
+    get_filtered_failed_transactions,
     get_failure_type_distribution,
     get_failure_breakdown_by_response_code,
     get_failure_breakdown_by_gateway,
@@ -52,7 +50,8 @@ filter_col1, filter_col2 = st.columns(2)
 with filter_col1:
     selected_failure = st.selectbox(
         "Failure Type",
-        ["All", "TEMPORARY", "PERMANENT"]
+        ["All", "TEMPORARY", "PERMANENT"],
+        key="kpi_failure_type_filter"
     )
 
 with filter_col2:
@@ -103,7 +102,12 @@ st.divider()
 with st.expander("🔍 Filter failed transactions", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
-        failure_type_filter = st.selectbox("Failure Type", options=["All", "TEMPORARY", "PERMANENT"], index=0)
+        failure_type_filter = st.selectbox(
+            "Failure Type",
+            options=["All", "TEMPORARY", "PERMANENT"],
+            index=0,
+            key="table_failure_type_filter"
+        )
         response_code_filter = st.text_input("Bank Response Code", placeholder="e.g. 05")
         gateway_filter = st.text_input("Gateway", placeholder="Enter gateway...")
     with col2:
