@@ -2,8 +2,6 @@ import pandas as pd
 
 from src.db import execute_query
 
-day4-failure-analysis-table
-
 
 def _get_total(query, params=None):
     result = execute_query(query, params, fetch=True)
@@ -50,7 +48,6 @@ def get_filtered_failed_transactions(
     if end_date:
         query += " AND t.created_at <= %s"
         params.append(end_date)
- main
 
     query += " ORDER BY t.created_at DESC"
     rows = execute_query(query, tuple(params), fetch=True)
@@ -355,7 +352,6 @@ def get_filtered_transactions(
     return pd.DataFrame(rows or [])
 
 
- day4-failure-analysis-table
 def count_filtered_transactions(
     transaction_id: str = None,
     customer_id: str = None,
@@ -488,7 +484,6 @@ def get_filtered_failed_transactions(
 # -----------------------------
 
 
-main
 def get_failure_breakdown_by_response_code():
     query = """
     SELECT
@@ -528,9 +523,6 @@ def get_failure_breakdown_by_payment_method():
     GROUP BY payment_method
     ORDER BY count DESC;
     """
- day4-failure-analysis-table
-    return execute_query(query, fetch=True)
-
     return execute_query(query, fetch=True)
 
 
@@ -606,4 +598,99 @@ def get_retry_success_rate_per_attempt():
         return placeholder
     return result
 
- main
+
+def get_retry_timing_analysis():
+    """
+    Calculate retry timing metrics from sequential payment retries.
+
+    Returns a dictionary with:
+    - average_hours_between_retries
+    - median_hours_between_retries
+    - best_window
+    - best_window_count
+    - window_distribution
+    """
+    query = """
+    SELECT
+        transaction_id,
+        attempt_number,
+        retry_timestamp
+    FROM payment_retries
+    ORDER BY transaction_id, attempt_number;
+    """
+    rows = execute_query(query, fetch=True) or []
+
+    if not rows:
+        return {
+            "average_hours_between_retries": 0.0,
+            "median_hours_between_retries": 0.0,
+            "best_window": "No data",
+            "best_window_count": 0,
+            "window_distribution": [{"window": "No data", "count": 0}],
+        }
+
+    df = pd.DataFrame(rows)
+    df["retry_timestamp"] = pd.to_datetime(df["retry_timestamp"], errors="coerce")
+    df = df.dropna(subset=["retry_timestamp"]).copy()
+
+    if df.empty:
+        return {
+            "average_hours_between_retries": 0.0,
+            "median_hours_between_retries": 0.0,
+            "best_window": "No data",
+            "best_window_count": 0,
+            "window_distribution": [{"window": "No data", "count": 0}],
+        }
+
+    intervals = []
+    for _, transaction_retries in df.groupby("transaction_id", sort=False):
+        ordered = transaction_retries.sort_values("attempt_number")
+        previous_time = None
+        for _, row in ordered.iterrows():
+            current_time = row["retry_timestamp"]
+            if previous_time is not None and pd.notna(current_time):
+                delta_hours = (current_time - previous_time).total_seconds() / 3600.0
+                if delta_hours >= 0:
+                    intervals.append(delta_hours)
+            previous_time = current_time
+
+    if not intervals:
+        return {
+            "average_hours_between_retries": 0.0,
+            "median_hours_between_retries": 0.0,
+            "best_window": "No data",
+            "best_window_count": 0,
+            "window_distribution": [{"window": "No data", "count": 0}],
+        }
+
+    interval_series = pd.Series(intervals)
+
+    def _bucket(hours):
+        if hours <= 6:
+            return "0-6 hrs"
+        if hours <= 12:
+            return "6-12 hrs"
+        if hours <= 24:
+            return "12-24 hrs"
+        if hours <= 48:
+            return "24-48 hrs"
+        return "48+ hrs"
+
+    window_counts = {}
+    for hours in intervals:
+        label = _bucket(hours)
+        window_counts[label] = window_counts.get(label, 0) + 1
+
+    window_distribution = [
+        {"window": label, "count": count}
+        for label, count in sorted(window_counts.items(), key=lambda item: item[0])
+    ]
+    best_window = max(window_distribution, key=lambda item: item["count"])
+
+    return {
+        "average_hours_between_retries": round(float(interval_series.mean()), 1),
+        "median_hours_between_retries": round(float(interval_series.median()), 1),
+        "best_window": best_window["window"],
+        "best_window_count": int(best_window["count"]),
+        "window_distribution": window_distribution,
+    }
