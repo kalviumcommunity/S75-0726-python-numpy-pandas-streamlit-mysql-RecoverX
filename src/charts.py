@@ -411,3 +411,144 @@ def retry_timing_analysis_chart(data=None):
 
     return fig
 
+# ---------------------------------------------------------
+# Retry Performance by Gateway
+# ---------------------------------------------------------
+
+def retry_gateway_performance_chart(data=None):
+
+    if not data:
+        data = [
+            {
+                "gateway": "Stripe",
+                "total_retries": 450,
+                "successful": 340,
+                "success_rate": 75.6,
+            },
+            {
+                "gateway": "Razorpay",
+                "total_retries": 310,
+                "successful": 205,
+                "success_rate": 66.1,
+            },
+            {
+                "gateway": "PayU",
+                "total_retries": 260,
+                "successful": 165,
+                "success_rate": 63.5,
+            },
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=df["gateway"],
+            y=df["total_retries"],
+            name="Retry Attempts",
+            marker_color="#2563eb",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["gateway"],
+            y=df["success_rate"],
+            name="Success Rate (%)",
+            yaxis="y2",
+            mode="lines+markers+text",
+            text=[f"{x}%" for x in df["success_rate"]],
+            textposition="top center",
+            line=dict(color="#16a34a", width=3),
+        )
+    )
+
+    fig.update_layout(
+        title="Retry Performance by Gateway",
+        height=400,
+        xaxis_title="Gateway",
+        yaxis_title="Retry Attempts",
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 100],
+            showgrid=False,
+        ),
+        hovermode="x unified",
+    )
+
+    return fig
+
+# ---------------------------------------------------------
+# Retry Performance by Bank
+# ---------------------------------------------------------
+
+def retry_bank_performance_chart(data=None):
+
+    if not data:
+        data = [
+            {
+                "bank": "HDFC",
+                "total_retries": 500,
+                "successful": 390,
+                "success_rate": 78.0,
+            },
+            {
+                "bank": "ICICI",
+                "total_retries": 420,
+                "successful": 305,
+                "success_rate": 72.6,
+            },
+            {
+                "bank": "SBI",
+                "total_retries": 360,
+                "successful": 230,
+                "success_rate": 63.9,
+            },
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=df["bank"],
+            y=df["total_retries"],
+            name="Retry Attempts",
+            marker_color="#f59e0b",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["bank"],
+            y=df["success_rate"],
+            name="Success Rate (%)",
+            mode="lines+markers+text",
+            yaxis="y2",
+            text=[f"{x}%" for x in df["success_rate"]],
+            textposition="top center",
+            line=dict(color="#dc2626", width=3),
+        )
+    )
+
+    fig.update_layout(
+        title="Retry Performance by Bank",
+        height=400,
+        xaxis_title="Bank",
+        yaxis_title="Retry Attempts",
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 100],
+            showgrid=False,
+        ),
+        hovermode="x unified",
+    )
+
+    return fig

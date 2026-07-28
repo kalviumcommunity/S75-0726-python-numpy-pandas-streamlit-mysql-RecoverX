@@ -4,93 +4,370 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
-from src.charts import placeholder_retry_attempts, retry_success_rate_per_attempt_chart, retry_timing_analysis_chart
-from src.payment_queries import get_retry_success_rate_per_attempt, get_retry_timing_analysis
+
+from src.ui_components import (
+    setup_page,
+    render_header,
+    render_sidebar,
+    render_footer,
+)
+
+from src.charts import (
+    placeholder_retry_attempts,
+    retry_success_rate_per_attempt_chart,
+    retry_timing_analysis_chart,
+    retry_gateway_performance_chart,
+    retry_bank_performance_chart,
+)
+
+from src.payment_queries import (
+    get_retry_success_rate_per_attempt,
+    get_retry_timing_analysis,
+    get_retry_gateway_performance,
+    get_retry_bank_performance,
+)
+
+# ----------------------------------------------------
+# Page Setup
+# ----------------------------------------------------
 
 setup_page("Retry Analytics", "🔁")
 render_header()
 date_range = render_sidebar()
 
-st.subheader("Analyze retry performance")
+st.subheader("Analyze Retry Performance")
+
+st.info(
+    """
+This dashboard helps analyze payment retry success,
+retry timing, gateway performance,
+and bank-level retry analytics.
+"""
+)
+
+if st.button("🔄 Refresh Data"):
+    st.rerun()
+
 st.divider()
 
-# --- Metrics ---
-st.subheader("Retry Success Rates per Attempt")
+# ----------------------------------------------------
+# Retry Success KPIs
+# ----------------------------------------------------
+
 success_data = get_retry_success_rate_per_attempt()
 
 if success_data:
-    total_attempts_all = sum(int(d.get("total_attempts", 0) or 0) for d in success_data)
-    total_successful = sum(int(d.get("successful", 0) or 0) for d in success_data)
-    overall_rate = round((total_successful / total_attempts_all) * 100, 1) if total_attempts_all else 0.0
-    best_idx = max(
-        range(len(success_data)),
-        key=lambda i: float(success_data[i].get("success_rate", 0) or 0),
-    )
-    best_attempt = success_data[best_idx]
 
-    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-    mcol1.metric("Total Retry Attempts", f"{total_attempts_all:,}")
-    mcol2.metric("Total Successful Retries", f"{total_successful:,}")
-    mcol3.metric("Overall Retry Success Rate", f"{overall_rate}%")
-    mcol4.metric(
+    total_attempts = sum(
+        int(row.get("total_attempts", 0))
+        for row in success_data
+    )
+
+    successful = sum(
+        int(row.get("successful", 0))
+        for row in success_data
+    )
+
+    overall_rate = (
+        round(successful / total_attempts * 100, 1)
+        if total_attempts else 0
+    )
+
+    best_attempt = max(
+        success_data,
+        key=lambda x: float(x.get("success_rate", 0))
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "Retry Attempts",
+        f"{total_attempts:,}"
+    )
+
+    c2.metric(
+        "Successful",
+        f"{successful:,}"
+    )
+
+    c3.metric(
+        "Success Rate",
+        f"{overall_rate}%"
+    )
+
+    c4.metric(
         "Best Attempt",
-        f"Attempt {int(best_attempt['attempt_number'])}",
-        f"{float(best_attempt['success_rate'])}%",
-        delta_color="normal",
+        f"Attempt {best_attempt['attempt_number']}",
+        f"{best_attempt['success_rate']}%"
     )
-    st.markdown("---")
 
-    chart_col, table_col = st.columns([2, 1])
-
-    with chart_col:
-        fig_rate = retry_success_rate_per_attempt_chart(success_data)
-        st.plotly_chart(fig_rate, width='stretch')
-
-    with table_col:
-        st.markdown("#### Breakdown by Attempt")
-        tbl_rows = []
-        for d in success_data:
-            an = int(d.get("attempt_number", 0))
-            tot = int(d.get("total_attempts", 0) or 0)
-            ok = int(d.get("successful", 0) or 0)
-            bad = int(d.get("failed", 0) or 0)
-            rate = float(d.get("success_rate", 0) or 0)
-            tbl_rows.append({
-                "Attempt": f"#{an}",
-                "Total": tot,
-                "Success": ok,
-                "Failed": bad,
-                "Success %": f"{rate}%",
-            })
-        df_tbl = pd.DataFrame(tbl_rows)
-        st.dataframe(df_tbl, hide_index=True, width='stretch')
 else:
-    st.info("No retry data available yet.")
+
+    st.warning("No retry analytics available.")
 
 st.divider()
 
-# --- Timing Analysis ---
+# ----------------------------------------------------
+# Success Rate Chart
+# ----------------------------------------------------
+
+st.subheader("Retry Success Rate per Attempt")
+
+left, right = st.columns([2,1])
+
+with left:
+
+    if success_data:
+
+        fig = retry_success_rate_per_attempt_chart(
+            success_data
+        )
+
+        st.plotly_chart(
+            fig,
+            width="stretch"
+        )
+
+    else:
+
+        st.info("No retry data available.")
+
+with right:
+
+    if success_data:
+
+        df = pd.DataFrame(success_data)
+
+        st.dataframe(
+            df,
+            hide_index=True,
+            width="stretch"
+        )
+
+        st.download_button(
+            "Download CSV",
+            df.to_csv(index=False),
+            "retry_success_rate.csv",
+            "text/csv"
+        )
+
+st.divider()
+
+# ----------------------------------------------------
+# Retry Timing Analysis
+# ----------------------------------------------------
+
 st.subheader("Retry Timing Analysis")
-timing_data = get_retry_timing_analysis()
-avg_hours = timing_data.get("average_hours_between_retries", 0.0)
-median_hours = timing_data.get("median_hours_between_retries", 0.0)
-best_window = timing_data.get("best_window", "No data")
-best_window_count = timing_data.get("best_window_count", 0)
-window_distribution = timing_data.get("window_distribution", [])
 
-mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-mcol1.metric("Avg Time Between Retries", f"{avg_hours:.1f} hrs")
-mcol2.metric("Median Time Between Retries", f"{median_hours:.1f} hrs")
-mcol3.metric("Most Common Window", best_window)
-mcol4.metric("Window Occurrences", f"{best_window_count:,}")
+timing = get_retry_timing_analysis()
 
-st.plotly_chart(retry_timing_analysis_chart(window_distribution), width='stretch')
+avg_time = timing.get(
+    "average_hours_between_retries",
+    0
+)
+
+median_time = timing.get(
+    "median_hours_between_retries",
+    0
+)
+
+best_window = timing.get(
+    "best_window",
+    "No Data"
+)
+
+window_count = timing.get(
+    "best_window_count",
+    0
+)
+
+distribution = timing.get(
+    "window_distribution",
+    []
+)
+
+c1, c2, c3, c4 = st.columns(4)
+
+c1.metric(
+    "Average Hours",
+    f"{avg_time:.2f}"
+)
+
+c2.metric(
+    "Median Hours",
+    f"{median_time:.2f}"
+)
+
+c3.metric(
+    "Best Retry Window",
+    best_window
+)
+
+c4.metric(
+    "Occurrences",
+    f"{window_count:,}"
+)
+
+fig = retry_timing_analysis_chart(distribution)
+
+st.plotly_chart(
+    fig,
+    width="stretch"
+)
+
 st.divider()
 
-# --- Chart ---
+# ----------------------------------------------------
+# Retry Attempts Distribution
+# ----------------------------------------------------
+
 st.subheader("Retry Attempts Distribution")
+
 fig = placeholder_retry_attempts()
-st.plotly_chart(fig, width='stretch')
+
+st.plotly_chart(
+    fig,
+    width="stretch"
+)
+
+st.divider()
+
+# ----------------------------------------------------
+# Gateway Performance
+# ----------------------------------------------------
+
+st.subheader("Retry Performance by Gateway")
+
+gateway_data = get_retry_gateway_performance()
+
+if gateway_data:
+
+    left, right = st.columns([2, 1])
+
+    with left:
+
+        fig = retry_gateway_performance_chart(
+            gateway_data
+        )
+
+        st.plotly_chart(
+            fig,
+            width="stretch"
+        )
+
+    with right:
+
+        df = pd.DataFrame(gateway_data)
+
+        st.dataframe(
+            df,
+            hide_index=True,
+            width="stretch"
+        )
+
+        st.download_button(
+            "Download Gateway CSV",
+            df.to_csv(index=False),
+            "gateway_retry_performance.csv",
+            "text/csv"
+        )
+
+else:
+
+    st.info("No gateway retry data available.")
+
+st.divider()
+
+# ----------------------------------------------------
+# Bank Performance
+# ----------------------------------------------------
+
+st.subheader("Retry Performance by Bank")
+
+bank_data = get_retry_bank_performance()
+
+if bank_data:
+
+    left, right = st.columns([2, 1])
+
+    with left:
+
+        fig = retry_bank_performance_chart(
+            bank_data
+        )
+
+        st.plotly_chart(
+            fig,
+            width="stretch"
+        )
+
+    with right:
+
+        df = pd.DataFrame(bank_data)
+
+        st.dataframe(
+            df,
+            hide_index=True,
+            width="stretch"
+        )
+
+        st.download_button(
+            "Download Bank CSV",
+            df.to_csv(index=False),
+            "bank_retry_performance.csv",
+            "text/csv"
+        )
+
+else:
+
+    st.info("No bank retry data available.")
+
+st.divider()
+
+# ----------------------------------------------------
+# Summary
+# ----------------------------------------------------
+
+st.subheader("Summary")
+
+summary_col1, summary_col2 = st.columns(2)
+
+with summary_col1:
+
+    st.success(
+        """
+✅ Retry analytics helps identify:
+
+• Best retry attempt
+
+• Best retry time window
+
+• Gateway performance
+
+• Bank-wise success trends
+"""
+    )
+
+with summary_col2:
+
+    st.info(
+        """
+📈 Recommendations
+
+• Retry more during the best-performing window
+
+• Prefer high-performing gateways
+
+• Monitor banks with low retry success
+
+• Reduce retries on consistently failing banks
+"""
+    )
+
+st.divider()
+
+# ----------------------------------------------------
+# Footer
+# ----------------------------------------------------
 
 render_footer()
