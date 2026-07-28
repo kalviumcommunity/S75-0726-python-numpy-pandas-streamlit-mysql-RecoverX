@@ -217,6 +217,17 @@ st.plotly_chart(
     width="stretch"
 )
 
+if distribution:
+    with st.expander("View Timing Data"):
+        df_timing = pd.DataFrame(distribution)
+        st.dataframe(df_timing, hide_index=True, width="stretch")
+        st.download_button(
+            "Download Timing CSV",
+            df_timing.to_csv(index=False),
+            "retry_timing_distribution.csv",
+            "text/csv",
+        )
+
 st.divider()
 
 # ----------------------------------------------------
@@ -230,6 +241,28 @@ heatmap_data = get_retry_success_by_time_heatmap()
 if heatmap_data and heatmap_data.get("values"):
     fig = retry_success_heatmap_chart(heatmap_data)
     st.plotly_chart(fig, width="stretch")
+
+    with st.expander("View Heatmap Data"):
+        days = heatmap_data.get("days", [])
+        hours = heatmap_data.get("hours", [])
+        values = heatmap_data.get("values", [])
+        heatmap_rows = []
+        for day_idx, day in enumerate(days):
+            for hour_idx, hour in enumerate(hours):
+                rate = values[day_idx][hour_idx] if day_idx < len(values) and hour_idx < len(values[day_idx]) else 0.0
+                heatmap_rows.append({
+                    "Day": day,
+                    "Hour": hour,
+                    "Success Rate (%)": rate,
+                })
+        df_heatmap = pd.DataFrame(heatmap_rows)
+        st.dataframe(df_heatmap, hide_index=True, width="stretch", height=300)
+        st.download_button(
+            "Download Heatmap CSV",
+            df_heatmap.to_csv(index=False),
+            "retry_heatmap_success_rates.csv",
+            "text/csv",
+        )
 else:
     st.info("No retry timing data available for the heatmap.")
 
@@ -339,6 +372,122 @@ if bank_data:
 else:
 
     st.info("No bank retry data available.")
+
+st.divider()
+
+# ----------------------------------------------------
+# Export All Retry Analytics
+# ----------------------------------------------------
+
+st.subheader("Export Retry Analytics")
+
+st.caption(
+    "Download combined retry analytics data in a single consolidated CSV report."
+)
+
+export_col1, export_col2 = st.columns(2)
+
+with export_col1:
+
+    analytics_rows = []
+
+    if success_data:
+        for row in success_data:
+            analytics_rows.append({
+                "Category": "Success per Attempt",
+                "Segment": f"Attempt {row['attempt_number']}",
+                "Metric 1": row["total_attempts"],
+                "Metric 1 Label": "Total Attempts",
+                "Metric 2": row["successful"],
+                "Metric 2 Label": "Successful",
+                "Metric 3": row["success_rate"],
+                "Metric 3 Label": "Success Rate (%)",
+            })
+
+    if distribution:
+        for row in distribution:
+            analytics_rows.append({
+                "Category": "Timing Window",
+                "Segment": row["window"],
+                "Metric 1": row["count"],
+                "Metric 1 Label": "Count",
+                "Metric 2": "",
+                "Metric 2 Label": "",
+                "Metric 3": "",
+                "Metric 3 Label": "",
+            })
+
+    if gateway_data:
+        for row in gateway_data:
+            analytics_rows.append({
+                "Category": "Gateway Performance",
+                "Segment": row.get("gateway", "Unknown"),
+                "Metric 1": row.get("total_retries", 0),
+                "Metric 1 Label": "Total Retries",
+                "Metric 2": row.get("successful", 0),
+                "Metric 2 Label": "Successful",
+                "Metric 3": row.get("success_rate", 0),
+                "Metric 3 Label": "Success Rate (%)",
+            })
+
+    if bank_data:
+        for row in bank_data:
+            analytics_rows.append({
+                "Category": "Bank Performance",
+                "Segment": row.get("bank", "Unknown"),
+                "Metric 1": row.get("total_retries", 0),
+                "Metric 1 Label": "Total Retries",
+                "Metric 2": row.get("successful", 0),
+                "Metric 2 Label": "Successful",
+                "Metric 3": row.get("success_rate", 0),
+                "Metric 3 Label": "Success Rate (%)",
+            })
+
+    if analytics_rows:
+        df_combined = pd.DataFrame(analytics_rows)
+        st.download_button(
+            "📊 Download Combined Analytics CSV",
+            df_combined.to_csv(index=False),
+            "retry_analytics_combined.csv",
+            "text/csv",
+            use_container_width=True,
+        )
+    else:
+        st.info("No analytics data available for combined export.")
+
+with export_col2:
+
+    kpi_export_rows = []
+
+    if success_data:
+        total_attempts_export = sum(int(r.get("total_attempts", 0)) for r in success_data)
+        total_successful_export = sum(int(r.get("successful", 0)) for r in success_data)
+        overall_rate_export = round(total_successful_export / total_attempts_export * 100, 1) if total_attempts_export else 0
+        best_attempt_export = max(success_data, key=lambda x: float(x.get("success_rate", 0)))
+
+        kpi_export_rows.extend([
+            {"KPI": "Total Retry Attempts", "Value": total_attempts_export},
+            {"KPI": "Successful Retries", "Value": total_successful_export},
+            {"KPI": "Overall Success Rate (%)", "Value": overall_rate_export},
+            {"KPI": "Best Attempt Number", "Value": best_attempt_export["attempt_number"]},
+            {"KPI": "Best Attempt Success Rate (%)", "Value": best_attempt_export["success_rate"]},
+        ])
+
+    kpi_export_rows.extend([
+        {"KPI": "Average Hours Between Retries", "Value": avg_time},
+        {"KPI": "Median Hours Between Retries", "Value": median_time},
+        {"KPI": "Best Retry Window", "Value": best_window},
+        {"KPI": "Best Window Occurrences", "Value": window_count},
+    ])
+
+    df_kpi = pd.DataFrame(kpi_export_rows)
+    st.download_button(
+        "📈 Download KPI Summary CSV",
+        df_kpi.to_csv(index=False),
+        "retry_analytics_kpi_summary.csv",
+        "text/csv",
+        use_container_width=True,
+    )
 
 st.divider()
 
