@@ -18,6 +18,8 @@ from src.charts import (
     failure_breakdown_by_response_code_chart,
     failure_breakdown_by_gateway_chart,
     failure_breakdown_by_payment_method_chart,
+    failure_causes_pie_chart,
+    failure_causes_bar_chart,
 )
 
 from src.payment_queries import (
@@ -26,6 +28,7 @@ from src.payment_queries import (
     get_failure_breakdown_by_response_code,
     get_failure_breakdown_by_gateway,
     get_failure_breakdown_by_payment_method,
+    get_failure_causes_distribution,
 )
 
 # ----------------------------------------------------
@@ -265,6 +268,71 @@ if response_code_data:
 else:
 
     st.info("No response code data found.")
+
+st.divider()
+
+# ----------------------------------------------------
+# Failure Causes Visualizations
+# ----------------------------------------------------
+
+st.subheader("Failure Causes Analysis")
+
+st.caption(
+    "Visualize the distribution of payment failure causes using pie and bar charts."
+)
+
+failure_causes_data = get_failure_causes_distribution()
+
+if failure_causes_data:
+
+    pie_col, bar_col = st.columns(2)
+
+    with pie_col:
+        fig_pie = failure_causes_pie_chart(failure_causes_data)
+        st.plotly_chart(fig_pie, width="stretch")
+
+    with bar_col:
+        fig_bar = failure_causes_bar_chart(failure_causes_data)
+        st.plotly_chart(fig_bar, width="stretch")
+
+    with st.expander("View Failure Causes Data"):
+
+        df_causes = pd.DataFrame(failure_causes_data)
+        df_causes["percentage"] = round(
+            df_causes["count"] / df_causes["count"].sum() * 100, 1
+        )
+        df_causes = df_causes.rename(columns={
+            "cause": "Failure Cause",
+            "count": "Count",
+            "percentage": "Percentage (%)",
+        })
+
+        st.dataframe(
+            df_causes,
+            width="stretch",
+            hide_index=True,
+        )
+
+        st.download_button(
+            "Download Failure Causes CSV",
+            df_causes.to_csv(index=False),
+            "failure_causes.csv",
+            "text/csv",
+        )
+
+    total_failures_causes = sum(row["count"] for row in failure_causes_data)
+    top_cause = failure_causes_data[0] if failure_causes_data else None
+    if top_cause:
+        top_pct = round(top_cause["count"] / total_failures_causes * 100, 1) if total_failures_causes else 0
+        st.warning(
+            f"**Top Failure Cause:** {top_cause['cause']} accounts for "
+            f"{top_pct}% ({top_cause['count']:,}) of all failures. "
+            f"Focus on resolving this to achieve the biggest impact."
+        )
+
+else:
+
+    st.info("No failure cause data available.")
 
 st.divider()
 
