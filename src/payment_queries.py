@@ -752,6 +752,65 @@ def get_retry_success_rate_per_attempt():
 
     return result
 
+
+def get_retry_success_by_time_heatmap():
+    """
+    Return retry success rates grouped by day-of-week and hour-of-day.
+
+    Returns a dictionary with:
+    - days: list of weekday labels Monday..Sunday
+    - hours: list of hour values 0..23
+    - values: 2D matrix of success rates, rows=days, cols=hours
+    """
+    query = """
+    SELECT
+        (DAYOFWEEK(retry_timestamp) + 5) % 7 AS day_index,
+        HOUR(retry_timestamp) AS hour_of_day,
+        COUNT(*) AS total_retries,
+        SUM(CASE WHEN UPPER(retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) AS successful
+    FROM payment_retries
+    WHERE retry_timestamp IS NOT NULL
+    GROUP BY day_index, hour_of_day
+    ORDER BY day_index, hour_of_day;
+    """
+
+    rows = execute_query(query, fetch=True) or []
+    if not rows:
+        return {
+            "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+            "hours": list(range(24)),
+            "values": [[0.0 for _ in range(24)] for _ in range(7)],
+        }
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return {
+            "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+            "hours": list(range(24)),
+            "values": [[0.0 for _ in range(24)] for _ in range(7)],
+        }
+
+    df["day_index"] = pd.to_numeric(df["day_index"], errors="coerce").fillna(0).astype(int)
+    df["hour_of_day"] = pd.to_numeric(df["hour_of_day"], errors="coerce").fillna(0).astype(int)
+    df["total_retries"] = pd.to_numeric(df["total_retries"], errors="coerce").fillna(0).astype(int)
+    df["successful"] = pd.to_numeric(df["successful"], errors="coerce").fillna(0).astype(int)
+
+    values = [[0.0 for _ in range(24)] for _ in range(7)]
+    for _, row in df.iterrows():
+        day_index = int(row["day_index"])
+        hour = int(row["hour_of_day"])
+        total = int(row["total_retries"])
+        success = int(row["successful"])
+        rate = round((success / total) * 100, 1) if total else 0.0
+        values[day_index][hour] = rate
+
+    return {
+        "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+        "hours": list(range(24)),
+        "values": values,
+    }
+
+
 def get_retry_timing_analysis():
     """
     Calculates retry timing analytics.

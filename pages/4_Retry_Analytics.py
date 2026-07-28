@@ -15,6 +15,7 @@ from src.ui_components import (
 from src.charts import (
     placeholder_retry_attempts,
     retry_success_rate_per_attempt_chart,
+    retry_success_heatmap_chart,
     retry_timing_analysis_chart,
     retry_gateway_performance_chart,
     retry_bank_performance_chart,
@@ -22,6 +23,7 @@ from src.charts import (
 
 from src.payment_queries import (
     get_retry_success_rate_per_attempt,
+    get_retry_success_by_time_heatmap,
     get_retry_timing_analysis,
     get_retry_gateway_performance,
     get_retry_bank_performance,
@@ -214,6 +216,22 @@ st.plotly_chart(
     fig,
     width="stretch"
 )
+
+st.divider()
+
+# ----------------------------------------------------
+# Retry Success Heatmap
+# ----------------------------------------------------
+
+st.subheader("Retry Success by Day and Hour")
+
+heatmap_data = get_retry_success_by_time_heatmap()
+
+if heatmap_data and heatmap_data.get("values"):
+    fig = retry_success_heatmap_chart(heatmap_data)
+    st.plotly_chart(fig, width="stretch")
+else:
+    st.info("No retry timing data available for the heatmap.")
 
 st.divider()
 
