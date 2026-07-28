@@ -285,3 +285,92 @@ def failure_causes_bar_chart(data=None):
 
     return fig
 
+
+def retry_success_rate_per_attempt_chart(data=None):
+    """
+    Dual-axis chart:
+      - Bars: total retry attempts per attempt_number
+      - Line: success rate (%) per attempt_number
+
+    Parameters
+    ----------
+    data : list of dict, optional
+        Each dict has keys: attempt_number, total_attempts, successful,
+        failed, success_rate. Falls back to placeholder values when empty.
+    """
+    if not data:
+        data = [
+            {"attempt_number": 1, "total_attempts": 850, "successful": 510, "failed": 340, "success_rate": 60.0},
+            {"attempt_number": 2, "total_attempts": 340, "successful": 204, "failed": 136, "success_rate": 60.0},
+            {"attempt_number": 3, "total_attempts": 136, "successful": 68,  "failed": 68,  "success_rate": 50.0},
+            {"attempt_number": 4, "total_attempts": 50,  "successful": 20,  "failed": 30,  "success_rate": 40.0},
+        ]
+
+    df = pd.DataFrame(data)
+    attempt_labels = [f"Attempt {int(n)}" for n in df["attempt_number"]]
+
+    bar_colors = ["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1", "#0c4a6e"]
+    color_len = len(bar_colors)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=attempt_labels,
+            y=df["total_attempts"],
+            name="Total Attempts",
+            marker_color=[bar_colors[i % color_len] for i in range(len(df))],
+            opacity=0.85,
+            hovertemplate=(
+                "Attempt %{x}<br>"
+                "Total: %{y}<br>"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=attempt_labels,
+            y=df["success_rate"],
+            name="Success Rate (%)",
+            mode="lines+markers+text",
+            yaxis="y2",
+            line_color="#16a34a",
+            line_width=3,
+            marker=dict(size=9, color="#16a34a"),
+            text=[f"{v}%" for v in df["success_rate"]],
+            textposition="top center",
+            textfont=dict(color="#16a34a", size=12),
+            hovertemplate=(
+                "Attempt %{x}<br>"
+                "Success Rate: %{y}%<br>"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        height=400,
+        margin=dict(l=0, r=0, t=40, b=0),
+        xaxis=dict(title="Retry Attempt Number"),
+        yaxis=dict(title="Total Attempts", side="left"),
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 105],
+            showgrid=False,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+        hovermode="x unified",
+    )
+
+    return fig
+
