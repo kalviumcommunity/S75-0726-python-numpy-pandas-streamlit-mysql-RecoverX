@@ -375,6 +375,54 @@ def retry_success_rate_per_attempt_chart(data=None):
     return fig
 
 
+def retry_success_heatmap_chart(data=None):
+    """
+    Heatmap chart showing retry success rate by day of week and hour of day.
+    """
+    if not data:
+        data = {
+            "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+            "hours": list(range(24)),
+            "values": [[0.0 for _ in range(24)] for _ in range(7)],
+        }
+
+    days = data.get("days") or ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    hours = data.get("hours") or list(range(24))
+    values = data.get("values") or [[0.0 for _ in range(24)] for _ in range(7)]
+
+    matrix = []
+    for row in values:
+        if len(row) < len(hours):
+            row = list(row) + [0.0] * (len(hours) - len(row))
+        matrix.append([0.0 if value is None else float(value) for value in row[:len(hours)]])
+
+    if len(matrix) < len(days):
+        matrix.extend([[0.0 for _ in range(len(hours))] for _ in range(len(days) - len(matrix))])
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=matrix,
+            x=hours,
+            y=days,
+            colorscale="Viridis",
+            zmin=0,
+            zmax=100,
+            colorbar_title="Success %",
+            hovertemplate="Day: %{y}<br>Hour: %{x}<br>Success Rate: %{z}%<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        title="Retry Success by Day and Hour",
+        height=420,
+        margin=dict(l=0, r=0, t=50, b=0),
+        xaxis_title="Hour of Day",
+        yaxis_title="Day of Week",
+    )
+
+    return fig
+
+
 def retry_timing_analysis_chart(data=None):
     """
     Bar chart for retry timing windows such as 0-6 hrs, 6-12 hrs, and 24-48 hrs.
