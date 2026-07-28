@@ -5,8 +5,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 import streamlit as st
 import pandas as pd
 from src.ui_components import setup_page, render_header, render_sidebar, render_footer
-from src.charts import placeholder_retry_attempts, retry_success_rate_per_attempt_chart
-from src.payment_queries import get_retry_success_rate_per_attempt
+from src.charts import placeholder_retry_attempts, retry_success_rate_per_attempt_chart, retry_timing_analysis_chart
+from src.payment_queries import get_retry_success_rate_per_attempt, get_retry_timing_analysis
 
 setup_page("Retry Analytics", "🔁")
 render_header()
@@ -68,6 +68,24 @@ if success_data:
 else:
     st.info("No retry data available yet.")
 
+st.divider()
+
+# --- Timing Analysis ---
+st.subheader("Retry Timing Analysis")
+timing_data = get_retry_timing_analysis()
+avg_hours = timing_data.get("average_hours_between_retries", 0.0)
+median_hours = timing_data.get("median_hours_between_retries", 0.0)
+best_window = timing_data.get("best_window", "No data")
+best_window_count = timing_data.get("best_window_count", 0)
+window_distribution = timing_data.get("window_distribution", [])
+
+mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+mcol1.metric("Avg Time Between Retries", f"{avg_hours:.1f} hrs")
+mcol2.metric("Median Time Between Retries", f"{median_hours:.1f} hrs")
+mcol3.metric("Most Common Window", best_window)
+mcol4.metric("Window Occurrences", f"{best_window_count:,}")
+
+st.plotly_chart(retry_timing_analysis_chart(window_distribution), width='stretch')
 st.divider()
 
 # --- Chart ---

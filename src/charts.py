@@ -374,3 +374,40 @@ def retry_success_rate_per_attempt_chart(data=None):
 
     return fig
 
+
+def retry_timing_analysis_chart(data=None):
+    """
+    Bar chart for retry timing windows such as 0-6 hrs, 6-12 hrs, and 24-48 hrs.
+    """
+    if not data:
+        data = [
+            {"window": "0-6 hrs", "count": 18},
+            {"window": "6-12 hrs", "count": 12},
+            {"window": "12-24 hrs", "count": 8},
+            {"window": "24-48 hrs", "count": 5},
+            {"window": "48+ hrs", "count": 2},
+        ]
+
+    df = pd.DataFrame(data)
+    if df.empty:
+        df = pd.DataFrame([{"window": "No data", "count": 0}])
+
+    fig = px.bar(
+        df,
+        x="window",
+        y="count",
+        color="window",
+        color_discrete_sequence=px.colors.sequential.Blues,
+    )
+
+    fig.update_layout(
+        height=360,
+        title="Retry Timing Windows",
+        margin=dict(l=0, r=0, t=50, b=0),
+        xaxis_title="Time Window",
+        yaxis_title="Observed Retry Intervals",
+        showlegend=False,
+    )
+
+    return fig
+
