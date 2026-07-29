@@ -1,13 +1,7 @@
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from src.db import execute_query
-from src.numpy_utils import (
-    bin_data,
-    calculate_basic_stats,
-    calculate_percentiles,
-)
 
 
 def _get_total(query, params=None):
@@ -29,8 +23,7 @@ def get_filtered_failed_transactions(
         t.payment_method, t.gateway, t.final_status, t.created_at,
         pr.response_code,
         COALESCE(fc.failure_type, brc.failure_type) AS failure_type,
-        COALESCE(brc.description, fc.root_cause) AS failure_description,
-        COALESCE(fc.recovery_potential, brc.recovery_potential) AS recovery_potential
+        COALESCE(brc.description, fc.root_cause) AS failure_description
     FROM transactions t
     LEFT JOIN payment_retries pr ON t.transaction_id = pr.transaction_id
     LEFT JOIN bank_response_codes brc ON pr.response_code = brc.response_code
@@ -260,6 +253,265 @@ def count_failure_classifications():
     FROM failure_classifications;
     """
     return _get_total(query)
+
+
+def get_revenue_recovery_summary(
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'TEMPORARY'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS recoverable_revenue,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'PERMANENT'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS permanently_lost_revenue
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
+    row = rows[0] if rows else {}
+
+    return {
+        "recoverable_revenue": float(row.get("recoverable_revenue") or 0),
+        "permanently_lost_revenue": float(row.get("permanently_lost_revenue") or 0),
+    }
+
+
+def get_recovery_score_distribution(
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        COALESCE(fc.recovery_score, brc.recovery_potential) AS score
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+        AND COALESCE(fc.recovery_score, brc.recovery_potential) IS NOT NULL
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
+    scores = pd.to_numeric(pd.Series([r.get("score") for r in rows]), errors="coerce").dropna()
+    scores = scores.clip(lower=0, upper=1)
+
+    if scores.empty:
+        return {
+            "distribution": [],
+            "stats": {},
+            "percentiles": {},
+            "total_scores": 0,
+        }
+
+    bins = [0, 0.2, 0.4, 0.6, 0.8, 1.0000001]
+    labels = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"]
+    bucketed = pd.cut(scores, bins=bins, labels=labels, include_lowest=True, right=False)
+    counts = bucketed.value_counts().reindex(labels, fill_value=0)
+
+    distribution = [
+        {"score_range": label, "count": int(counts[label])}
+        for label in labels
+    ]
+
+    percentiles = scores.quantile([0.25, 0.75, 0.9]).to_dict()
+
+    return {
+        "distribution": distribution,
+        "stats": {
+            "mean": float(scores.mean()),
+            "median": float(scores.median()),
+        },
+        "percentiles": {
+            "p25": float(percentiles.get(0.25, 0)),
+            "p75": float(percentiles.get(0.75, 0)),
+            "p90": float(percentiles.get(0.9, 0)),
+        },
+        "total_scores": int(scores.shape[0]),
+    }
+
+
+def get_revenue_impact_by_gateway(
+    start_date: str = None,
+    end_date: str = None,
+    limit: int = 10,
+):
+    query = """
+    SELECT
+        COALESCE(t.gateway, 'Unknown') AS gateway,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'TEMPORARY'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS recoverable_revenue,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'PERMANENT'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS permanently_lost_revenue
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    query += """
+    GROUP BY COALESCE(t.gateway, 'Unknown')
+    ORDER BY (recoverable_revenue + permanently_lost_revenue) DESC
+    LIMIT %s
+    """
+    params.append(limit)
+
+    rows = execute_query(query, tuple(params), fetch=True)
+    return pd.DataFrame(rows or [])
+
+
+def get_revenue_impact_over_time(
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        DATE(t.created_at) AS period,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'TEMPORARY'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS recoverable_revenue,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'PERMANENT'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS permanently_lost_revenue
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    query += """
+    GROUP BY DATE(t.created_at)
+    ORDER BY DATE(t.created_at)
+    """
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True)
+    return pd.DataFrame(rows or [])
 
 
 # -----------------------------
@@ -558,101 +810,6 @@ def get_failure_causes_distribution():
         """
         result = execute_query(query_fallback, fetch=True)
     return result or []
-
-
-def get_revenue_recovery_summary():
-    """
-    Calculate recoverable and permanently lost revenue from failed transactions.
-    """
-    query = """
-    SELECT
-        COALESCE(
-            SUM(
-                CASE
-                    WHEN UPPER(fc.failure_type) = 'TEMPORARY' THEN t.amount
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS recoverable_revenue,
-        COALESCE(
-            SUM(
-                CASE
-                    WHEN UPPER(fc.failure_type) = 'PERMANENT' THEN t.amount
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS permanently_lost_revenue
-    FROM failure_classifications fc
-    JOIN transactions t
-        ON fc.transaction_id = t.transaction_id
-    WHERE UPPER(COALESCE(t.final_status, '')) != 'SUCCESS';
-    """
-    rows = execute_query(query, fetch=True) or []
-    row = rows[0] if rows else {}
-    return {
-        "recoverable_revenue": float(row.get("recoverable_revenue") or 0),
-        "permanently_lost_revenue": float(
-            row.get("permanently_lost_revenue") or 0
-        ),
-    }
-
-
-def get_recovery_score_distribution(bins=5):
-    """
-    Return recovery score histogram buckets and summary statistics.
-    """
-    query = """
-    SELECT fc.recovery_score
-    FROM failure_classifications fc
-    JOIN transactions t
-        ON fc.transaction_id = t.transaction_id
-    WHERE UPPER(COALESCE(t.final_status, '')) != 'SUCCESS'
-      AND fc.recovery_score IS NOT NULL
-    ORDER BY fc.recovery_score;
-    """
-    rows = execute_query(query, fetch=True) or []
-
-    scores = np.array(
-        [
-            float(row["recovery_score"])
-            for row in rows
-            if row.get("recovery_score") is not None
-        ],
-        dtype=float,
-    )
-
-    if scores.size == 0:
-        return {
-            "distribution": [],
-            "stats": {},
-            "percentiles": {},
-            "total_scores": 0,
-        }
-
-    bucket_count = min(max(int(scores.size), 1), bins)
-    counts, edges = bin_data(scores, bins=bucket_count)
-
-    distribution = []
-    for index, count in enumerate(counts.tolist()):
-        start = float(edges[index])
-        end = float(edges[index + 1])
-        distribution.append(
-            {
-                "score_range": f"{start * 100:.0f}% - {end * 100:.0f}%",
-                "range_start": start,
-                "range_end": end,
-                "count": int(count),
-            }
-        )
-
-    return {
-        "distribution": distribution,
-        "stats": calculate_basic_stats(scores),
-        "percentiles": calculate_percentiles(scores, [25, 50, 75, 90]),
-        "total_scores": int(scores.size),
-    }
 
 
 def get_retry_success_rate_per_attempt():
@@ -1212,6 +1369,88 @@ def get_retry_bank_performance():
         ]
 
     return results
+
+
+def get_prioritized_transactions_to_retry(
+    limit: int = 50,
+    max_attempts: int = 3,
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        t.transaction_id,
+        t.customer_id,
+        t.amount,
+        t.currency,
+        t.payment_method,
+        t.gateway,
+        t.initial_status,
+        t.final_status,
+        t.created_at,
+        COALESCE(rc.retry_attempts, 0) AS retry_attempts,
+        lpr.retry_timestamp AS last_retry_at,
+        lpr.retry_status AS last_retry_status,
+        lpr.response_code AS last_response_code,
+        COALESCE(fc.failure_type, brc.failure_type) AS failure_type,
+        COALESCE(fc.recovery_score, brc.recovery_potential, 0) AS recovery_score,
+        COALESCE(brc.recommended_action, '') AS recommended_action,
+        COALESCE(brc.description, fc.root_cause) AS failure_description,
+        (
+            COALESCE(fc.recovery_score, brc.recovery_potential, 0) * 100
+            + CASE WHEN fc.is_high_value THEN 10 ELSE 0 END
+            + LEAST(CAST(t.amount AS DECIMAL(15, 2)) / 100, 10)
+            - COALESCE(rc.retry_attempts, 0) * 5
+        ) AS priority_score
+    FROM transactions t
+    LEFT JOIN (
+        SELECT
+            transaction_id,
+            COUNT(*) AS retry_attempts
+        FROM payment_retries
+        GROUP BY transaction_id
+    ) rc
+        ON t.transaction_id = rc.transaction_id
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+        AND COALESCE(rc.retry_attempts, 0) < %s
+    """
+    params = [max_attempts]
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    query += """
+    ORDER BY
+        priority_score DESC,
+        t.created_at DESC
+    LIMIT %s
+    """
+    params.append(limit)
+
+    rows = execute_query(query, tuple(params), fetch=True)
+    return pd.DataFrame(rows or [])
 
 # =====================================================
 # Retry Analytics - Gateway Performance Chart

@@ -27,6 +27,7 @@ from src.payment_queries import (
     get_retry_timing_analysis,
     get_retry_gateway_performance,
     get_retry_bank_performance,
+    get_prioritized_transactions_to_retry,
 )
 
 # ----------------------------------------------------
@@ -36,6 +37,11 @@ from src.payment_queries import (
 setup_page("Retry Analytics", "🔁")
 render_header()
 date_range = render_sidebar()
+start_date = None
+end_date = None
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    start_date = date_range[0].isoformat() if date_range[0] else None
+    end_date = date_range[1].isoformat() if date_range[1] else None
 
 st.subheader("Analyze Retry Performance")
 
@@ -265,6 +271,31 @@ if heatmap_data and heatmap_data.get("values"):
         )
 else:
     st.info("No retry timing data available for the heatmap.")
+
+st.divider()
+
+st.subheader("Prioritized Transactions to Retry")
+
+df_prioritized = get_prioritized_transactions_to_retry(
+    start_date=start_date,
+    end_date=end_date,
+)
+
+if not df_prioritized.empty:
+    st.dataframe(
+        df_prioritized,
+        hide_index=True,
+        width="stretch",
+        height=350,
+    )
+    st.download_button(
+        "Download Prioritized Transactions CSV",
+        df_prioritized.to_csv(index=False),
+        "prioritized_transactions_to_retry.csv",
+        "text/csv",
+    )
+else:
+    st.info("No eligible transactions found to prioritize for retry.")
 
 st.divider()
 
