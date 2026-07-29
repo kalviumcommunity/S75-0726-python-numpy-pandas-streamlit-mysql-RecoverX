@@ -29,7 +29,8 @@ def get_filtered_failed_transactions(
         t.payment_method, t.gateway, t.final_status, t.created_at,
         pr.response_code,
         COALESCE(fc.failure_type, brc.failure_type) AS failure_type,
-        COALESCE(brc.description, fc.root_cause) AS failure_description
+        COALESCE(brc.description, fc.root_cause) AS failure_description,
+        COALESCE(fc.recovery_potential, brc.recovery_potential) AS recovery_potential
     FROM transactions t
     LEFT JOIN payment_retries pr ON t.transaction_id = pr.transaction_id
     LEFT JOIN bank_response_codes brc ON pr.response_code = brc.response_code

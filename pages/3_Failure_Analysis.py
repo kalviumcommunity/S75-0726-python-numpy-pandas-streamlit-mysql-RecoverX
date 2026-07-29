@@ -132,6 +132,41 @@ except Exception as error:
     failed_transactions = pd.DataFrame()
 
 if not failed_transactions.empty:
+    if "recovery_potential" in failed_transactions.columns:
+        failed_transactions["recovery_potential"] = pd.to_numeric(
+            failed_transactions["recovery_potential"], errors="coerce"
+        )
+        high_value_threshold = 0.75
+        high_value_candidates = failed_transactions.loc[
+            failed_transactions["recovery_potential"].fillna(0) >= high_value_threshold
+        ].copy()
+
+        if not high_value_candidates.empty:
+            high_value_candidates = high_value_candidates.sort_values(
+                by=["recovery_potential", "amount"],
+                ascending=[False, False]
+            ).head(5)
+
+            st.subheader("High-Value Recovery Candidates")
+            st.markdown(
+                "These failed transactions have the highest recovery potential and value."
+            )
+            st.dataframe(
+                high_value_candidates[
+                    [
+                        "transaction_id",
+                        "customer_id",
+                        "amount",
+                        "currency",
+                        "gateway",
+                        "failure_type",
+                        "recovery_potential",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
     st.subheader("Failed Transactions")
     st.dataframe(failed_transactions, use_container_width=True, hide_index=True)
 else:
