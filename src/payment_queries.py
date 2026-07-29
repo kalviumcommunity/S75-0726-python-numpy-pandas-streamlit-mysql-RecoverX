@@ -1,7 +1,13 @@
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from src.db import execute_query
+from src.numpy_utils import (
+    bin_data,
+    calculate_basic_stats,
+    calculate_percentiles,
+)
 
 
 def _get_total(query, params=None):
@@ -551,6 +557,101 @@ def get_failure_causes_distribution():
         """
         result = execute_query(query_fallback, fetch=True)
     return result or []
+
+
+def get_revenue_recovery_summary():
+    """
+    Calculate recoverable and permanently lost revenue from failed transactions.
+    """
+    query = """
+    SELECT
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN UPPER(fc.failure_type) = 'TEMPORARY' THEN t.amount
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS recoverable_revenue,
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN UPPER(fc.failure_type) = 'PERMANENT' THEN t.amount
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS permanently_lost_revenue
+    FROM failure_classifications fc
+    JOIN transactions t
+        ON fc.transaction_id = t.transaction_id
+    WHERE UPPER(COALESCE(t.final_status, '')) != 'SUCCESS';
+    """
+    rows = execute_query(query, fetch=True) or []
+    row = rows[0] if rows else {}
+    return {
+        "recoverable_revenue": float(row.get("recoverable_revenue") or 0),
+        "permanently_lost_revenue": float(
+            row.get("permanently_lost_revenue") or 0
+        ),
+    }
+
+
+def get_recovery_score_distribution(bins=5):
+    """
+    Return recovery score histogram buckets and summary statistics.
+    """
+    query = """
+    SELECT fc.recovery_score
+    FROM failure_classifications fc
+    JOIN transactions t
+        ON fc.transaction_id = t.transaction_id
+    WHERE UPPER(COALESCE(t.final_status, '')) != 'SUCCESS'
+      AND fc.recovery_score IS NOT NULL
+    ORDER BY fc.recovery_score;
+    """
+    rows = execute_query(query, fetch=True) or []
+
+    scores = np.array(
+        [
+            float(row["recovery_score"])
+            for row in rows
+            if row.get("recovery_score") is not None
+        ],
+        dtype=float,
+    )
+
+    if scores.size == 0:
+        return {
+            "distribution": [],
+            "stats": {},
+            "percentiles": {},
+            "total_scores": 0,
+        }
+
+    bucket_count = min(max(int(scores.size), 1), bins)
+    counts, edges = bin_data(scores, bins=bucket_count)
+
+    distribution = []
+    for index, count in enumerate(counts.tolist()):
+        start = float(edges[index])
+        end = float(edges[index + 1])
+        distribution.append(
+            {
+                "score_range": f"{start * 100:.0f}% - {end * 100:.0f}%",
+                "range_start": start,
+                "range_end": end,
+                "count": int(count),
+            }
+        )
+
+    return {
+        "distribution": distribution,
+        "stats": calculate_basic_stats(scores),
+        "percentiles": calculate_percentiles(scores, [25, 50, 75, 90]),
+        "total_scores": int(scores.size),
+    }
 
 
 def get_retry_success_rate_per_attempt():
