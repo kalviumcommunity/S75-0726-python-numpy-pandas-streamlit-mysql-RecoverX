@@ -354,6 +354,226 @@ def delete_alert_rule(rule_id):
     return execute_query(query, (rule_id,), fetch=False)
 
 
+def _evaluate_threshold(value, threshold, condition):
+    if value is None or threshold is None:
+        return False
+
+    if condition == ">":
+        return value > threshold
+    if condition == ">=":
+        return value >= threshold
+    if condition == "<":
+        return value < threshold
+    if condition == "<=":
+        return value <= threshold
+    if condition in ("=", "=="):
+        return value == threshold
+
+    return False
+
+
+def _alert_severity_for_rule(rule_type):
+    mapping = {
+        "failure_rate": "HIGH",
+        "success_rate": "HIGH",
+        "response_trend": "MEDIUM",
+    }
+    return mapping.get(rule_type, "LOW")
+
+
+def create_alert(
+    rule_id,
+    alert_type,
+    message,
+    severity="MEDIUM",
+    is_resolved=False,
+):
+    query = """
+    INSERT INTO alerts (
+        rule_id,
+        alert_type,
+        message,
+        severity,
+        is_resolved
+    )
+    VALUES (%s, %s, %s, %s, %s);
+    """
+    return execute_query(
+        query,
+        (
+            rule_id,
+            alert_type,
+            message,
+            severity,
+            is_resolved,
+        ),
+        fetch=False,
+    )
+
+
+def _alert_exists(rule_id, message, window_hours=24):
+    query = """
+    SELECT alert_id
+    FROM alerts
+    WHERE rule_id = %s
+      AND message = %s
+      AND created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+    """
+    rows = execute_query(query, (rule_id, message, window_hours), fetch=True)
+    return bool(rows)
+
+
+def get_alerts(is_resolved=None, limit=50):
+    query = "SELECT * FROM alerts"
+    params = []
+    if is_resolved is not None:
+        query += " WHERE is_resolved = %s"
+        params.append(is_resolved)
+
+    query += " ORDER BY created_at DESC LIMIT %s"
+    params.append(limit)
+
+    return execute_query(query, tuple(params), fetch=True) or []
+
+
+def get_transaction_counts(start_date: str = None, end_date: str = None):
+    query = """
+    SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN final_status = 'SUCCESS' THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN final_status = 'FAILED' THEN 1 ELSE 0 END) AS failed
+    FROM transactions
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+
+    rows = execute_query(query, tuple(params), fetch=True) or []
+    return rows[0] if rows else {"total": 0, "success": 0, "failed": 0}
+
+
+def get_top_response_trend(start_date: str = None, end_date: str = None):
+    query = """
+    SELECT
+        pr.response_code,
+        COALESCE(brc.description, 'Unknown') AS description,
+        COUNT(*) AS count
+    FROM payment_retries pr
+    LEFT JOIN bank_response_codes brc
+        ON pr.response_code = brc.response_code
+    WHERE pr.retry_status = 'FAILED'
+    """
+    params = []
+    if start_date:
+        query += " AND pr.retry_timestamp >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND pr.retry_timestamp <= %s"
+        params.append(end_date)
+
+    query += " GROUP BY pr.response_code, brc.description ORDER BY count DESC LIMIT 1"
+
+    rows = execute_query(query, tuple(params), fetch=True) or []
+    if not rows:
+        return None
+
+    failed_total = _get_total(
+        "SELECT COUNT(*) AS total FROM payment_retries WHERE retry_status = 'FAILED'"
+        + (" AND retry_timestamp >= %s" if start_date else "")
+        + (" AND retry_timestamp <= %s" if end_date else ""),
+        tuple(params) if params else None,
+    )
+    if not failed_total:
+        return None
+
+    top_row = rows[0]
+    share = round((float(top_row["count"]) / failed_total) * 100, 2)
+    return {
+        "response_code": top_row["response_code"],
+        "description": top_row["description"],
+        "count": int(top_row["count"]),
+        "share": share,
+    }
+
+
+def generate_alerts_from_rules(start_date: str = None, end_date: str = None):
+    rules = [rule for rule in get_alert_rules() if rule["is_active"]]
+    if not rules:
+        return []
+
+    counts = get_transaction_counts(start_date, end_date)
+    total = int(counts.get("total", 0) or 0)
+    successful = int(counts.get("success", 0) or 0)
+    failed = int(counts.get("failed", 0) or 0)
+
+    failure_rate = round((failed / total) * 100, 2) if total else 0.0
+    success_rate = round((successful / total) * 100, 2) if total else 0.0
+    response_trend = get_top_response_trend(start_date, end_date)
+
+    created_alerts = []
+
+    for rule in rules:
+        triggered = False
+        message = None
+
+        if rule["rule_type"] == "failure_rate":
+            triggered = _evaluate_threshold(
+                failure_rate,
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Failure rate is {failure_rate}% which {'exceeds' if rule['threshold_condition'] in ('>', '>=') else 'meets'} "
+                f"the threshold of {rule['threshold_value']}%."
+            )
+        elif rule["rule_type"] == "success_rate":
+            triggered = _evaluate_threshold(
+                success_rate,
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Success rate is {success_rate}% which {'falls below' if rule['threshold_condition'] in ('<', '<=') else 'meets'} "
+                f"the threshold of {rule['threshold_value']}%."
+            )
+        elif rule["rule_type"] == "response_trend" and response_trend:
+            triggered = _evaluate_threshold(
+                response_trend["share"],
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Response code {response_trend['response_code']} ({response_trend['description']}) accounts for "
+                f"{response_trend['share']}% of failed retries, above the threshold of {rule['threshold_value']}%."
+            )
+
+        if triggered and message:
+            if not _alert_exists(rule["rule_id"], message):
+                severity = _alert_severity_for_rule(rule["rule_type"])
+                created = create_alert(
+                    rule_id=rule["rule_id"],
+                    alert_type=rule["rule_type"],
+                    message=message,
+                    severity=severity,
+                )
+                if created:
+                    created_alerts.append(
+                        {
+                            "rule_id": rule["rule_id"],
+                            "alert_type": rule["rule_type"],
+                            "message": message,
+                            "severity": severity,
+                        }
+                    )
+
+    return created_alerts
+
+
 # -----------------------------
 # Failure Classification
 # -----------------------------
