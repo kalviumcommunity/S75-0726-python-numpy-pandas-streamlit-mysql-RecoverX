@@ -2025,65 +2025,100 @@ def retry_bank_performance_chart(data=None):
 
 def get_active_alerts():
     """
-    Fetch active alerts from the alerts table.
-    Returns placeholder data if the table is empty
-    or doesn't exist yet.
+    Fetch unresolved alerts from the alerts table.
+    Returns a safe list of dictionaries with the fields expected by the UI.
     """
 
     query = """
     SELECT
         alert_id,
-        alert_title,
-        alert_message,
+        alert_type,
+        message,
         severity,
-        status,
-        created_at
+        is_resolved,
+        created_at,
+        resolved_at
     FROM alerts
-    WHERE status='ACTIVE'
+    WHERE is_resolved = FALSE
     ORDER BY created_at DESC;
     """
 
     try:
-        result = execute_query(query, fetch=True)
+        rows = execute_query(query, fetch=True)
+        if not rows:
+            return []
 
-        if result:
-            return result
-
+        result = []
+        for row in rows:
+            result.append(
+                {
+                    "alert_id": int(row.get("alert_id") or 0),
+                    "alert_title": row.get("alert_type") or "Alert",
+                    "alert_message": row.get("message") or "",
+                    "severity": row.get("severity") or "LOW",
+                    "status": "ACTIVE",
+                    "created_at": row.get("created_at"),
+                    "resolved_at": row.get("resolved_at"),
+                }
+            )
+        return result
     except Exception:
-        pass
+        return []
 
-    # Placeholder data
-    return [
-        {
-            "alert_id": 1,
-            "alert_title": "Gateway Failure Rate",
-            "alert_message": "Stripe gateway failure rate exceeded 35%",
-            "severity": "CRITICAL",
-            "status": "ACTIVE",
-            "created_at": "2026-07-08 10:30",
-        },
-        {
-            "alert_id": 2,
-            "alert_title": "Retry Success Dropped",
-            "alert_message": "Retry success rate fell below 60%",
-            "severity": "HIGH",
-            "status": "ACTIVE",
-            "created_at": "2026-07-08 09:15",
-        },
-        {
-            "alert_id": 3,
-            "alert_title": "High Failed Transactions",
-            "alert_message": "Failed payments increased by 18%",
-            "severity": "MEDIUM",
-            "status": "ACTIVE",
-            "created_at": "2026-07-07 22:10",
-        },
-        {
-            "alert_id": 4,
-            "alert_title": "Temporary Network Errors",
-            "alert_message": "Temporary bank connectivity issues detected",
-            "severity": "LOW",
-            "status": "ACTIVE",
-            "created_at": "2026-07-07 17:20",
-        },
-    ]
+
+def mark_alert_resolved(alert_id):
+    """
+    Mark an alert as resolved by updating its resolution state and timestamp.
+    """
+    if alert_id is None:
+        return False
+
+    query = """
+    UPDATE alerts
+    SET is_resolved = TRUE,
+        resolved_at = CURRENT_TIMESTAMP
+    WHERE alert_id = %s;
+    """
+    try:
+        return execute_query(query, (alert_id,), fetch=False)
+    except Exception:
+        return False
+
+
+def get_resolved_alerts(start_date=None, end_date=None, severity=None):
+    """
+    Return resolved alerts as a DataFrame, with optional date/severity filters.
+    """
+    query = """
+    SELECT
+        alert_id,
+        rule_id,
+        alert_type,
+        message,
+        severity,
+        is_resolved,
+        created_at,
+        resolved_at
+    FROM alerts
+    WHERE is_resolved = TRUE
+    """
+    params = []
+
+    if start_date:
+        query += " AND resolved_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND resolved_at <= %s"
+        params.append(end_date)
+    if severity:
+        query += " AND severity = %s"
+        params.append(severity)
+
+    query += " ORDER BY resolved_at DESC, created_at DESC"
+
+    try:
+        rows = execute_query(query, tuple(params), fetch=True)
+    except Exception:
+        rows = []
+
+    return pd.DataFrame(rows or [])
