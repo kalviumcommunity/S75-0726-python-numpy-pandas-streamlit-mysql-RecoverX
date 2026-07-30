@@ -234,6 +234,126 @@ def get_failure_type_distribution():
     return result
 
 
+# ==========================================================
+# DAY 7 - ALERTS & NOTIFICATIONS
+# ==========================================================
+
+def get_alert_rules():
+    """
+    Return all alert rules ordered by most recently updated.
+    """
+    query = """
+    SELECT
+        rule_id,
+        rule_name,
+        rule_type,
+        threshold_value,
+        threshold_condition,
+        is_active,
+        created_at,
+        updated_at
+    FROM alert_rules
+    ORDER BY updated_at DESC, rule_id DESC;
+    """
+    rows = execute_query(query, fetch=True) or []
+
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "rule_id": int(row["rule_id"]),
+                "rule_name": row["rule_name"],
+                "rule_type": row["rule_type"],
+                "threshold_value": float(row["threshold_value"] or 0),
+                "threshold_condition": row["threshold_condition"],
+                "is_active": bool(row["is_active"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        )
+
+    return result
+
+
+def create_alert_rule(
+    rule_name,
+    rule_type,
+    threshold_value,
+    threshold_condition,
+    is_active,
+):
+    """
+    Create a new alert rule.
+    """
+    query = """
+    INSERT INTO alert_rules (
+        rule_name,
+        rule_type,
+        threshold_value,
+        threshold_condition,
+        is_active
+    )
+    VALUES (%s, %s, %s, %s, %s);
+    """
+    return execute_query(
+        query,
+        (
+            rule_name,
+            rule_type,
+            threshold_value,
+            threshold_condition,
+            is_active,
+        ),
+        fetch=False,
+    )
+
+
+def update_alert_rule(
+    rule_id,
+    rule_name,
+    rule_type,
+    threshold_value,
+    threshold_condition,
+    is_active,
+):
+    """
+    Update an existing alert rule.
+    """
+    query = """
+    UPDATE alert_rules
+    SET
+        rule_name = %s,
+        rule_type = %s,
+        threshold_value = %s,
+        threshold_condition = %s,
+        is_active = %s
+    WHERE rule_id = %s;
+    """
+    return execute_query(
+        query,
+        (
+            rule_name,
+            rule_type,
+            threshold_value,
+            threshold_condition,
+            is_active,
+            rule_id,
+        ),
+        fetch=False,
+    )
+
+
+def delete_alert_rule(rule_id):
+    """
+    Delete an alert rule by ID.
+    """
+    query = """
+    DELETE FROM alert_rules
+    WHERE rule_id = %s;
+    """
+    return execute_query(query, (rule_id,), fetch=False)
+
+
 # -----------------------------
 # Failure Classification
 # -----------------------------
