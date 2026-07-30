@@ -9,7 +9,10 @@ import streamlit as st
 from src.payment_queries import (
     create_alert_rule,
     delete_alert_rule,
+    get_active_alerts,
     get_alert_rules,
+    get_resolved_alerts,
+    mark_alert_resolved,
     update_alert_rule,
 )
 from src.ui_components import (
@@ -235,5 +238,117 @@ if alert_rules:
                     st.rerun()
 else:
     st.info("No alert rules available yet.")
+
+st.divider()
+st.subheader("Active Alerts & History")
+
+try:
+    active_alerts = get_active_alerts() or []
+except Exception as error:
+    st.error(f"Unable to load active alerts: {error}")
+    active_alerts = []
+
+if active_alerts:
+    st.subheader("Active Alerts")
+    for alert in active_alerts:
+        severity = alert.get("severity") or "LOW"
+        icon = {
+            "LOW": "🟢",
+            "MEDIUM": "🟡",
+            "HIGH": "🟠",
+            "CRITICAL": "🔴",
+        }.get(severity, "⚪")
+
+        with st.container(border=True):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.markdown(f"### {icon} {severity} - {alert['alert_title']}")
+                st.write(alert.get("alert_message") or "")
+                st.caption(f"Created: {alert.get('created_at') or 'Unknown'}")
+            with col2:
+                if st.button(
+                    "Mark as Resolved",
+                    key=f"resolve_alert_{alert['alert_id']}",
+                ):
+                    try:
+                        resolved = mark_alert_resolved(alert["alert_id"])
+                        if resolved:
+                            st.success("Alert marked as resolved.")
+                            st.rerun()
+                        else:
+                            st.error("Unable to mark the alert as resolved.")
+                    except Exception as error:
+                        st.error(f"Unable to mark the alert as resolved: {error}")
+else:
+    st.info("No active alerts to resolve right now.")
+
+st.divider()
+st.subheader("Alert History")
+
+history_col1, history_col2 = st.columns(2)
+with history_col1:
+    history_start = st.date_input(
+        "Start Date",
+        value=None,
+        key="alert_history_start",
+    )
+with history_col2:
+    history_end = st.date_input(
+        "End Date",
+        value=None,
+        key="alert_history_end",
+    )
+
+severity_filter = st.selectbox(
+    "Severity",
+    ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+    key="alert_history_severity",
+)
+
+if history_start and history_end and history_start > history_end:
+    st.error("The start date must be before or equal to the end date.")
+    resolved_history = pd.DataFrame([])
+else:
+    try:
+        start_date_value = (
+            pd.Timestamp(history_start).strftime("%Y-%m-%d 00:00:00")
+            if history_start is not None
+            else None
+        )
+        end_date_value = (
+            pd.Timestamp(history_end).strftime("%Y-%m-%d 23:59:59")
+            if history_end is not None
+            else None
+        )
+
+        resolved_history = get_resolved_alerts(
+            start_date=start_date_value,
+            end_date=end_date_value,
+            severity=(None if severity_filter == "ALL" else severity_filter),
+        )
+    except Exception as error:
+        st.error(f"Unable to load alert history: {error}")
+        resolved_history = pd.DataFrame([])
+
+if resolved_history.empty:
+    st.info("No resolved alerts found for the selected filters.")
+else:
+    display_df = resolved_history[[
+        "alert_id",
+        "alert_type",
+        "severity",
+        "message",
+        "created_at",
+        "resolved_at",
+    ]].copy()
+    display_df.columns = [
+        "Alert ID",
+        "Alert Type",
+        "Severity",
+        "Message",
+        "Created At",
+        "Resolved At",
+    ]
+    st.dataframe(display_df, hide_index=True, width="stretch")
 
 render_footer()
