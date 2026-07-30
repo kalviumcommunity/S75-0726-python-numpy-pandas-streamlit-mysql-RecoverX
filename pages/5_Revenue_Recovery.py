@@ -1,159 +1,211 @@
 import sys
 from pathlib import Path
-
 sys.path.append(str(Path(__file__).parent.parent))
 
-from io import BytesIO
-import pandas as pd
 import streamlit as st
+import pandas as pd
 
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
-from src.charts import (
-    recovery_score_distribution_chart,
-    revenue_impact_by_gateway_chart,
-    revenue_impact_over_time_chart,
+from src.ui_components import (
+    setup_page,
+    render_header,
+    render_sidebar,
+    render_footer,
 )
+
 from src.payment_queries import (
-    get_recovery_score_distribution,
-    get_revenue_recovery_summary,
-    get_revenue_impact_by_gateway,
-    get_revenue_impact_over_time,
+    get_active_alerts,
 )
 
-setup_page("Revenue Recovery", "💸")
+from src.charts import (
+    alert_severity_chart,
+)
+
+# ---------------------------------------------------------
+# Page Setup
+# ---------------------------------------------------------
+
+setup_page("Alerts & Notifications", "🚨")
+
 render_header()
+
 date_range = render_sidebar()
-start_date = None
-end_date = None
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date = date_range[0].isoformat() if date_range[0] else None
-    end_date = date_range[1].isoformat() if date_range[1] else None
 
-st.subheader("Identify and track recoverable revenue")
-st.divider()
+st.subheader("Alerts & Notifications")
 
-try:
-    revenue_summary = get_revenue_recovery_summary(start_date=start_date, end_date=end_date)
-    score_data = get_recovery_score_distribution(start_date=start_date, end_date=end_date)
-    impact_by_gateway = get_revenue_impact_by_gateway(start_date=start_date, end_date=end_date)
-    impact_over_time = get_revenue_impact_over_time(start_date=start_date, end_date=end_date)
-except Exception as error:
-    st.error(f"Unable to load revenue recovery data from the database: {error}")
-    revenue_summary = {
-        "recoverable_revenue": 0.0,
-        "permanently_lost_revenue": 0.0,
-    }
-    score_data = {
-        "distribution": [],
-        "stats": {},
-        "percentiles": {},
-        "total_scores": 0,
-    }
-    impact_by_gateway = pd.DataFrame()
-    impact_over_time = pd.DataFrame()
+st.info(
+    """
+Monitor payment failures, retry issues and gateway problems in real time.
+"""
+)
 
-col1, col2 = st.columns(2)
-with col1:
-    st.metric(
-        "Total Recoverable Revenue",
-        f"${revenue_summary['recoverable_revenue']:,.2f}",
-    )
-with col2:
-    st.metric(
-        "Permanently Lost Revenue",
-        f"${revenue_summary['permanently_lost_revenue']:,.2f}",
-    )
+refresh = st.button("🔄 Refresh Alerts")
+
+if refresh:
+    st.rerun()
 
 st.divider()
 
-st.subheader("Recovery Score Distribution")
+# ---------------------------------------------------------
+# Load Alerts
+# ---------------------------------------------------------
 
-distribution = score_data.get("distribution", [])
-stats = score_data.get("stats", {})
-percentiles = score_data.get("percentiles", {})
+alerts = get_active_alerts()
 
-if distribution:
-    left, right = st.columns([2, 1])
+df = pd.DataFrame(alerts)
 
-    with left:
-        fig = recovery_score_distribution_chart(distribution)
-        st.plotly_chart(fig, width="stretch")
+if df.empty:
 
-    with right:
-        c1, c2 = st.columns(2)
-        c1.metric("Transactions Scored", f"{score_data.get('total_scores', 0):,}")
-        c2.metric("Average Score", f"{stats.get('mean', 0) * 100:.1f}%")
+    st.warning("No active alerts found.")
 
-        summary_df = pd.DataFrame(
-            [
-                {"Metric": "Median Score", "Value": f"{stats.get('median', 0) * 100:.1f}%"},
-                {"Metric": "25th Percentile", "Value": f"{percentiles.get('p25', 0) * 100:.1f}%"},
-                {"Metric": "75th Percentile", "Value": f"{percentiles.get('p75', 0) * 100:.1f}%"},
-                {"Metric": "90th Percentile", "Value": f"{percentiles.get('p90', 0) * 100:.1f}%"},
-            ]
+    render_footer()
+
+    st.stop()
+
+# ---------------------------------------------------------
+# KPI Metrics
+# ---------------------------------------------------------
+
+total_alerts = len(df)
+
+critical = len(df[df["severity"] == "CRITICAL"])
+
+high = len(df[df["severity"] == "HIGH"])
+
+medium = len(df[df["severity"] == "MEDIUM"])
+
+low = len(df[df["severity"] == "LOW"])
+
+c1, c2, c3, c4, c5 = st.columns(5)
+
+c1.metric(
+    "Total Alerts",
+    total_alerts,
+)
+
+c2.metric(
+    "Critical",
+    critical,
+)
+
+c3.metric(
+    "High",
+    high,
+)
+
+c4.metric(
+    "Medium",
+    medium,
+)
+
+c5.metric(
+    "Low",
+    low,
+)
+
+st.divider()
+
+# ---------------------------------------------------------
+# Severity Filter
+# ---------------------------------------------------------
+
+severity = st.selectbox(
+    "Filter by Severity",
+    [
+        "ALL",
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+    ],
+)
+
+if severity != "ALL":
+    df = df[df["severity"] == severity]
+
+# ---------------------------------------------------------
+# Alert Severity Chart
+# ---------------------------------------------------------
+
+st.subheader("Alert Severity Distribution")
+
+severity_counts = (
+    df.groupby("severity")
+      .size()
+      .reset_index(name="count")
+      .to_dict("records")
+)
+
+fig = alert_severity_chart(severity_counts)
+
+st.plotly_chart(
+    fig,
+    width="stretch",
+)
+
+st.divider()
+
+# ---------------------------------------------------------
+# Active Alerts
+# ---------------------------------------------------------
+
+st.subheader("Active Alerts")
+
+severity_colors = {
+    "LOW": "🟢",
+    "MEDIUM": "🟡",
+    "HIGH": "🟠",
+    "CRITICAL": "🔴",
+}
+
+for _, row in df.iterrows():
+
+    icon = severity_colors.get(row["severity"], "⚪")
+
+    with st.container(border=True):
+
+        st.markdown(
+            f"### {icon} {row['severity']} - {row['alert_title']}"
         )
-        st.dataframe(summary_df, hide_index=True, width="stretch")
-else:
-    st.info("No recovery score data available.")
+
+        st.write(row["alert_message"])
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.caption(f"Status: {row['status']}")
+
+        with col2:
+            st.caption(f"Created: {row['created_at']}")
+
+# ---------------------------------------------------------
+# Alerts Table
+# ---------------------------------------------------------
 
 st.divider()
 
-st.subheader("Revenue Impact")
+st.subheader("Alerts Table")
 
-left, right = st.columns(2)
+st.dataframe(
+    df,
+    hide_index=True,
+    width="stretch",
+)
 
-with left:
-    fig = revenue_impact_over_time_chart(impact_over_time)
-    st.plotly_chart(fig, width="stretch")
+# ---------------------------------------------------------
+# Export CSV
+# ---------------------------------------------------------
 
-with right:
-    fig = revenue_impact_by_gateway_chart(impact_by_gateway)
-    st.plotly_chart(fig, width="stretch")
-
-table_left, table_right = st.columns(2)
-
-with table_left:
-    if isinstance(impact_over_time, pd.DataFrame) and not impact_over_time.empty:
-        st.dataframe(impact_over_time, hide_index=True, width="stretch", height=250)
-    else:
-        st.info("No revenue impact time series available.")
-
-with table_right:
-    if isinstance(impact_by_gateway, pd.DataFrame) and not impact_by_gateway.empty:
-        st.dataframe(impact_by_gateway, hide_index=True, width="stretch", height=250)
-    else:
-        st.info("No revenue impact by gateway available.")
-
-st.divider()
-
-st.subheader("Export to Excel")
-
-export_buffer = BytesIO()
-with pd.ExcelWriter(export_buffer, engine="openpyxl") as writer:
-    pd.DataFrame(
-        [
-            {"Metric": "Total Recoverable Revenue", "Value": revenue_summary.get("recoverable_revenue", 0)},
-            {"Metric": "Permanently Lost Revenue", "Value": revenue_summary.get("permanently_lost_revenue", 0)},
-        ]
-    ).to_excel(writer, sheet_name="Summary", index=False)
-
-    pd.DataFrame(distribution).to_excel(writer, sheet_name="Score Distribution", index=False)
-
-    if isinstance(impact_by_gateway, pd.DataFrame):
-        impact_by_gateway.to_excel(writer, sheet_name="Impact by Gateway", index=False)
-    else:
-        pd.DataFrame().to_excel(writer, sheet_name="Impact by Gateway", index=False)
-
-    if isinstance(impact_over_time, pd.DataFrame):
-        impact_over_time.to_excel(writer, sheet_name="Impact Over Time", index=False)
-    else:
-        pd.DataFrame().to_excel(writer, sheet_name="Impact Over Time", index=False)
+csv = df.to_csv(index=False)
 
 st.download_button(
-    "Download Revenue Impact Excel",
-    export_buffer.getvalue(),
-    "revenue_impact_report.xlsx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "📥 Download Alerts CSV",
+    csv,
+    "alerts.csv",
+    "text/csv",
 )
+
+# ---------------------------------------------------------
+# Footer
+# ---------------------------------------------------------
 
 render_footer()
