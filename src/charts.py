@@ -717,3 +717,63 @@ def retry_bank_performance_chart(data=None):
     )
 
     return fig
+
+# ---------------------------------------------------------
+# Alert Severity Distribution
+# ---------------------------------------------------------
+
+def alert_severity_chart(data=None):
+
+    if not data:
+        data = [
+            {"severity": "LOW", "count": 4},
+            {"severity": "MEDIUM", "count": 7},
+            {"severity": "HIGH", "count": 5},
+            {"severity": "CRITICAL", "count": 2},
+        ]
+
+    df = pd.DataFrame(data)
+
+    fig = px.pie(
+        df,
+        names="severity",
+        values="count",
+        hole=0.45,
+        color="severity",
+        color_discrete_map={
+            "LOW": "#22c55e",
+            "MEDIUM": "#eab308",
+            "HIGH": "#f97316",
+            "CRITICAL": "#dc2626",
+        },
+    )
+
+    fig.update_traces(
+        textinfo="percent+label",
+        marker=dict(
+            line=dict(
+                color="white",
+                width=2,
+            )
+        ),
+    )
+
+    fig.update_layout(
+        title="Alert Severity Distribution",
+        height=380,
+        margin=dict(
+            l=0,
+            r=0,
+            t=50,
+            b=0,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+
+    return fig

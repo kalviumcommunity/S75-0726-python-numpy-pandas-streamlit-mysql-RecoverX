@@ -2019,3 +2019,71 @@ def retry_bank_performance_chart(data=None):
 
     return fig
 
+# ---------------------------------------------------------
+# Alerts & Notifications
+# ---------------------------------------------------------
+
+def get_active_alerts():
+    """
+    Fetch active alerts from the alerts table.
+    Returns placeholder data if the table is empty
+    or doesn't exist yet.
+    """
+
+    query = """
+    SELECT
+        alert_id,
+        alert_title,
+        alert_message,
+        severity,
+        status,
+        created_at
+    FROM alerts
+    WHERE status='ACTIVE'
+    ORDER BY created_at DESC;
+    """
+
+    try:
+        result = execute_query(query, fetch=True)
+
+        if result:
+            return result
+
+    except Exception:
+        pass
+
+    # Placeholder data
+    return [
+        {
+            "alert_id": 1,
+            "alert_title": "Gateway Failure Rate",
+            "alert_message": "Stripe gateway failure rate exceeded 35%",
+            "severity": "CRITICAL",
+            "status": "ACTIVE",
+            "created_at": "2026-07-08 10:30",
+        },
+        {
+            "alert_id": 2,
+            "alert_title": "Retry Success Dropped",
+            "alert_message": "Retry success rate fell below 60%",
+            "severity": "HIGH",
+            "status": "ACTIVE",
+            "created_at": "2026-07-08 09:15",
+        },
+        {
+            "alert_id": 3,
+            "alert_title": "High Failed Transactions",
+            "alert_message": "Failed payments increased by 18%",
+            "severity": "MEDIUM",
+            "status": "ACTIVE",
+            "created_at": "2026-07-07 22:10",
+        },
+        {
+            "alert_id": 4,
+            "alert_title": "Temporary Network Errors",
+            "alert_message": "Temporary bank connectivity issues detected",
+            "severity": "LOW",
+            "status": "ACTIVE",
+            "created_at": "2026-07-07 17:20",
+        },
+    ]
