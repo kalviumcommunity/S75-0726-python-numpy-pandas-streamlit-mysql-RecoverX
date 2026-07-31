@@ -5,7 +5,12 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import os
 from datetime import datetime
-from src.data_cleaning import clean_transactions, clean_payment_retries, clean_bank_response_codes
+from src.data_cleaning import (
+    clean_transactions,
+    clean_payment_retries,
+    clean_bank_response_codes,
+    validate_import_dataframe,
+)
 
 load_dotenv()
 
@@ -32,8 +37,12 @@ def import_transactions_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
-        # Clean the data
-        cleaned_df = clean_transactions(df)
+        validation = validate_import_dataframe(df, "transactions")
+        if not validation["valid"]:
+            print("Validation failed for transactions CSV:", ", ".join(validation["errors"]))
+            return False
+
+        cleaned_df = validation["cleaned_df"]
         cursor = connection.cursor()
 
         for _, row in cleaned_df.iterrows():
@@ -67,8 +76,12 @@ def import_payment_retries_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
-        # Clean the data
-        cleaned_df = clean_payment_retries(df)
+        validation = validate_import_dataframe(df, "payment_retries")
+        if not validation["valid"]:
+            print("Validation failed for payment_retries CSV:", ", ".join(validation["errors"]))
+            return False
+
+        cleaned_df = validation["cleaned_df"]
         cursor = connection.cursor()
 
         for _, row in cleaned_df.iterrows():
@@ -99,8 +112,12 @@ def import_bank_response_codes_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
-        # Clean the data
-        cleaned_df = clean_bank_response_codes(df)
+        validation = validate_import_dataframe(df, "bank_response_codes")
+        if not validation["valid"]:
+            print("Validation failed for bank_response_codes CSV:", ", ".join(validation["errors"]))
+            return False
+
+        cleaned_df = validation["cleaned_df"]
         cursor = connection.cursor()
 
         for _, row in cleaned_df.iterrows():

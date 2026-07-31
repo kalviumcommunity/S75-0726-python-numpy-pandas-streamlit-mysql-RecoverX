@@ -9,7 +9,12 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import os
 from src.ui_components import setup_page, render_header, render_sidebar, render_footer
-from src.data_cleaning import clean_transactions, clean_payment_retries, clean_bank_response_codes
+from src.data_cleaning import (
+    clean_transactions,
+    clean_payment_retries,
+    clean_bank_response_codes,
+    validate_import_dataframe,
+)
 
 load_dotenv()
 
@@ -124,19 +129,39 @@ uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
+    validation = validate_import_dataframe(df, table)
+
     st.write("Preview of uploaded data:")
     st.dataframe(df.head())
 
-    if st.button("Import Data"):
-        if table == "transactions":
-            success, count = import_transactions(df)
-        elif table == "payment_retries":
-            success, count = import_payment_retries(df)
-        elif table == "bank_response_codes":
-            success, count = import_bank_response_codes(df)
+    if validation["missing_columns"]:
+        st.error(
+            "Upload validation failed. Missing required columns: "
+            + ", ".join(validation["missing_columns"])
+        )
+    else:
+        st.success(
+            f"Validation passed. {validation['cleaned_rows']} rows are ready to import "
+            f"after cleaning."
+        )
+        if validation["invalid_rows"]:
+            st.warning(
+                f"{validation['invalid_rows']} rows were dropped during validation."
+            )
 
-        if success:
-            st.success(f"Successfully imported {count} records!")
+    if st.button("Import Data"):
+        if not validation["valid"]:
+            st.error("Import blocked. Please fix the CSV file before importing.")
+        else:
+            if table == "transactions":
+                success, count = import_transactions(validation["cleaned_df"])
+            elif table == "payment_retries":
+                success, count = import_payment_retries(validation["cleaned_df"])
+            elif table == "bank_response_codes":
+                success, count = import_bank_response_codes(validation["cleaned_df"])
+
+            if success:
+                st.success(f"Successfully imported {count} records!")
 
 st.divider()
 st.subheader("Example CSV Templates")
