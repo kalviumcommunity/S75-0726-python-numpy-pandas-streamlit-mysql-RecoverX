@@ -914,6 +914,54 @@ def get_failed_transactions():
     return execute_query(query, fetch=True)
 
 
+def get_dashboard_key_metrics():
+    """
+    Return real-time dashboard KPI values.
+    """
+    total_query = """
+    SELECT COUNT(*) AS total
+    FROM transactions;
+    """
+    successful_query = """
+    SELECT COUNT(*) AS total
+    FROM transactions
+    WHERE UPPER(COALESCE(final_status, '')) = 'SUCCESS';
+    """
+    revenue_recovered_query = """
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM transactions
+    WHERE UPPER(COALESCE(initial_status, '')) != 'SUCCESS'
+      AND UPPER(COALESCE(final_status, '')) = 'SUCCESS';
+    """
+    retry_attempts_query = """
+    SELECT COUNT(*) AS total
+    FROM payment_retries;
+    """
+
+    total_rows = execute_query(total_query, fetch=True) or []
+    successful_rows = execute_query(successful_query, fetch=True) or []
+    recovered_rows = execute_query(revenue_recovered_query, fetch=True) or []
+    retry_rows = execute_query(retry_attempts_query, fetch=True) or []
+
+    total_transactions = int((total_rows[0] or {}).get("total", 0)) if total_rows else 0
+    successful_transactions = int((successful_rows[0] or {}).get("total", 0)) if successful_rows else 0
+    revenue_recovered = float((recovered_rows[0] or {}).get("total", 0) or 0) if recovered_rows else 0.0
+    retry_attempts = int((retry_rows[0] or {}).get("total", 0)) if retry_rows else 0
+
+    success_rate = round(
+        (successful_transactions / total_transactions) * 100,
+        1,
+    ) if total_transactions else 0.0
+
+    return {
+        "total_transactions": total_transactions,
+        "successful_transactions": successful_transactions,
+        "success_rate": success_rate,
+        "revenue_recovered": revenue_recovered,
+        "retry_attempts": retry_attempts,
+    }
+
+
 def get_filtered_transactions(
     transaction_id: str = None,
     customer_id: str = None,
