@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import io
 from src.ui_components import setup_page, render_header, render_sidebar, render_footer
-from src.payment_queries import get_total_transactions, get_successful_transactions, get_failed_transactions
+from src.payment_queries import get_dashboard_key_metrics
 
 setup_page("Dashboard", "📊")
 render_header()
@@ -15,15 +15,26 @@ date_range = render_sidebar()
 
 # --- Metrics Cards ---
 st.subheader("Key Metrics")
+try:
+    metrics = get_dashboard_key_metrics()
+except Exception as error:
+    st.error(f"Unable to load dashboard metrics from the database: {error}")
+    metrics = {
+        "total_transactions": 0,
+        "success_rate": 0.0,
+        "revenue_recovered": 0.0,
+        "retry_attempts": 0,
+    }
+
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Total Transactions", "12,345", "+8.0%", delta_color="normal")
+    st.metric("Total Transactions", f"{metrics['total_transactions']:,}")
 with col2:
-    st.metric("Success Rate", "85.3%", "+2.5%", delta_color="normal")
+    st.metric("Success Rate", f"{metrics['success_rate']:.1f}%")
 with col3:
-    st.metric("Revenue Recovered", "$45,678", "+12.3%", delta_color="normal")
+    st.metric("Revenue Recovered", f"${metrics['revenue_recovered']:,.2f}")
 with col4:
-    st.metric("Retry Attempts", "3,456", "-3.2%", delta_color="inverse")
+    st.metric("Retry Attempts", f"{metrics['retry_attempts']:,}")
 st.markdown("---")
 
 # --- Charts Section ---
