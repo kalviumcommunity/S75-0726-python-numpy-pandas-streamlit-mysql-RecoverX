@@ -22,9 +22,31 @@ DB_PORT=3306
 DB_USER=your_database_user
 DB_PASSWORD=your_database_password
 DB_NAME=recoverx
+API_KEY=recoverx-secret-key
 ```
 
 If using a remote database (e.g., Aiven, AWS RDS), replace the values with your remote database's connection details.
+
+### Optional: SMTP (for Alerts & Notifications test email send)
+To enable the “Send Test Email” button on the Alerts & Notifications page, add these variables to `.env`:
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your-login@example.com
+SMTP_PASSWORD=your-app-password-or-password
+SMTP_FROM=recoverx@example.com
+SMTP_USE_TLS=true
+```
+
+- `SMTP_USE_TLS` defaults to `true` when unset; set `false` for providers that use implicit SSL or unencrypted localhost SMTP.
+- The email test sender is implemented in `src/email_service.py` (standard-library `smtplib`; TLS started with `starttls()` when enabled).
+
+### Excel Export Dependency
+Revenue Recovery pages export multi-sheet `.xlsx` workbooks using `openpyxl`. It is already listed in `requirements.txt`; ensure you install it:
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
