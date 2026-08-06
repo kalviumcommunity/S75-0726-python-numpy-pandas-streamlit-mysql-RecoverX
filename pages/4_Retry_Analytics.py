@@ -28,7 +28,20 @@ from src.payment_queries import (
     get_retry_gateway_performance,
     get_retry_bank_performance,
     get_prioritized_transactions_to_retry,
+    get_retry_attempts_distribution,
+    get_ineffective_retry_patterns,
 )
+
+
+get_retry_success_rate_per_attempt = st.cache_data(show_spinner=False, ttl=300)(get_retry_success_rate_per_attempt)
+get_retry_success_by_time_heatmap = st.cache_data(show_spinner=False, ttl=300)(get_retry_success_by_time_heatmap)
+get_retry_timing_analysis = st.cache_data(show_spinner=False, ttl=300)(get_retry_timing_analysis)
+get_retry_gateway_performance = st.cache_data(show_spinner=False, ttl=300)(get_retry_gateway_performance)
+get_retry_bank_performance = st.cache_data(show_spinner=False, ttl=300)(get_retry_bank_performance)
+get_prioritized_transactions_to_retry = st.cache_data(show_spinner=False, ttl=300)(get_prioritized_transactions_to_retry)
+get_retry_attempts_distribution = st.cache_data(show_spinner=False, ttl=300)(get_retry_attempts_distribution)
+get_ineffective_retry_patterns = st.cache_data(show_spinner=False, ttl=300)(get_ineffective_retry_patterns)
+
 
 # ----------------------------------------------------
 # Page Setup
@@ -112,6 +125,66 @@ if success_data:
 else:
 
     st.warning("No retry analytics available.")
+
+st.divider()
+
+# ----------------------------------------------------
+# Retry Recommendations
+# ----------------------------------------------------
+
+st.subheader("Retry Recommendations")
+
+timing = get_retry_timing_analysis()
+avg_time = timing.get("average_hours_between_retries", 0)
+median_time = timing.get("median_hours_between_retries", 0)
+best_window = timing.get("best_window", "No Data")
+window_count = timing.get("best_window_count", 0)
+distribution = timing.get("window_distribution", [])
+
+recommendation_lines = []
+if success_data:
+    best_attempt = max(
+        success_data,
+        key=lambda x: float(x.get("success_rate", 0)),
+    )
+    worst_attempt = min(
+        success_data,
+        key=lambda x: float(x.get("success_rate", 0)),
+    )
+    recommendation_lines.append(
+        f"**Best attempt to retry:** Attempt #{best_attempt['attempt_number']} achieves "
+        f"the highest success rate at **{best_attempt['success_rate']}%** across "
+        f"**{best_attempt['total_attempts']:,}** recorded attempts."
+    )
+    recommendation_lines.append(
+        f"**Least effective attempt:** Attempt #{worst_attempt['attempt_number']} has success "
+        f"rate of only **{worst_attempt['success_rate']}%** — consider dropping or delaying "
+        f"this attempt further to save capacity."
+    )
+
+if best_window and best_window != "No Data":
+    recommendation_lines.append(
+        f"**Best retry window:** `{best_window}` — observed "
+        f"**{window_count:,}** successes in this bucket, so schedule high-priority retries here."
+    )
+
+recommendation_lines.append(
+    f"**Average gap between retries:** {avg_time:.2f} hours (median {median_time:.2f}h). "
+    f"Widening the gap may improve success for bank-issued temporary declines."
+)
+
+for line in recommendation_lines:
+    st.markdown(f"- {line}")
+
+if success_data and best_window and best_window != "No Data":
+    best_attempt_rec = max(
+        success_data,
+        key=lambda x: float(x.get("success_rate", 0)),
+    )
+    st.success(
+        f"**Best window:** {best_window} · **Best attempt:** Attempt "
+        f"#{best_attempt_rec['attempt_number']} at {best_attempt_rec['success_rate']}%"
+    )
 
 st.divider()
 
@@ -305,12 +378,111 @@ st.divider()
 
 st.subheader("Retry Attempts Distribution")
 
-fig = placeholder_retry_attempts()
+try:
+    retry_dist_raw = get_retry_attempts_distribution() or []
+    df_retry_dist = pd.DataFrame(retry_dist_raw)
+except Exception as error:
+    st.error(f"Unable to load retry attempts distribution: {error}")
+    df_retry_dist = pd.DataFrame([])
 
-st.plotly_chart(
-    fig,
-    width="stretch"
+if df_retry_dist.empty:
+    st.info("No retry attempt distribution data available yet.")
+else:
+    try:
+        df_retry_dist["attempt_count"] = pd.to_numeric(
+            df_retry_dist["attempt_count"], errors="coerce"
+        ).fillna(0).astype(int)
+        df_retry_dist["attempt_category"] = df_retry_dist["attempt_count"].apply(
+            lambda x: "4+" if x >= 4 else str(x)
+        )
+        retry_counts = (
+            df_retry_dist.groupby("attempt_category")
+            .size()
+            .reset_index(name="Transactions")
+        )
+        retry_counts.columns = ["Attempts", "Transactions"]
+        retry_counts["sort_key"] = retry_counts["Attempts"].apply(
+            lambda x: 4 if x == "4+" else int(x)
+        )
+        retry_counts = retry_counts.sort_values("sort_key").drop("sort_key", axis=1)
+        fig_retry_dist = px.bar(
+            retry_counts,
+            x="Attempts",
+            y="Transactions",
+            color="Attempts",
+            color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1", "#0c4a6e"],
+        )
+        fig_retry_dist.update_layout(
+            height=350,
+            margin={"l": 0, "r": 0, "t": 30, "b": 0},
+            showlegend=False,
+        )
+        st.plotly_chart(fig_retry_dist, width="stretch")
+        with st.expander("Show Retry Distribution Data"):
+            st.dataframe(retry_counts, hide_index=True, width="stretch")
+    except Exception as err:
+        st.warning(f"Could not render retry distribution chart: {err}")
+
+st.divider()
+
+# ----------------------------------------------------
+# Ineffective Retry Patterns
+# ----------------------------------------------------
+
+st.subheader("⛔ Ineffective Retry Patterns (Success Rate < 20%)")
+st.caption(
+    "These segments rarely succeed on retry. Consider stopping retries here "
+    "to save capacity, reduce issuer friction, and focus effort on high-value opportunities."
 )
+
+try:
+    ineffective_patterns = get_ineffective_retry_patterns(threshold_success_rate=20.0)
+except Exception as error:
+    st.error(f"Unable to load ineffective retry patterns: {error}")
+    ineffective_patterns = []
+
+if not ineffective_patterns:
+    st.success("🎉 No ineffective patterns detected — all retry segments exceed the 20% success threshold.")
+else:
+    df_ineffective = pd.DataFrame(ineffective_patterns)
+    display_ineffective = df_ineffective.rename(columns={
+        "category": "Category",
+        "pattern": "Pattern",
+        "total": "Total Retries",
+        "successful": "Successful",
+        "success_rate": "Success Rate (%)",
+        "recommendation": "Recommendation",
+    })
+    category_map = {
+        "Attempt Number": "🔁 Attempt",
+        "Gateway": "🌐 Gateway",
+        "Bank/Response Code": "🏦 Bank/Code",
+    }
+    display_ineffective["Category"] = display_ineffective["Category"].map(
+        lambda c: category_map.get(str(c), c)
+    )
+    st.dataframe(
+        display_ineffective,
+        hide_index=True,
+        width="stretch",
+        use_container_width=True,
+    )
+
+    st.markdown("#### 🛑 Stop Retrying These")
+    for _, p in df_ineffective.iterrows():
+        st.warning(
+            f"**[{p['category']}] {p['pattern']}**: "
+            f"{p['success_rate']:.1f}% success across {p['total']:,} attempts → "
+            f"{p['recommendation']}"
+        )
+
+    ineff_csv = display_ineffective.to_csv(index=False)
+    st.download_button(
+        "📥 Download Ineffective Patterns CSV",
+        ineff_csv,
+        "ineffective_retry_patterns.csv",
+        "text/csv",
+    )
 
 st.divider()
 

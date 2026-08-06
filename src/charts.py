@@ -777,3 +777,78 @@ def alert_severity_chart(data=None):
     )
 
     return fig
+
+
+def transaction_status_over_time_chart(data=None):
+    if data is None or len(data) == 0:
+        return placeholder_transactions_overview()
+
+    df = pd.DataFrame(data)
+    if df.empty or "date" not in df.columns:
+        return placeholder_transactions_overview()
+
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).sort_values("date")
+
+    if df.empty:
+        return placeholder_transactions_overview()
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=pd.to_numeric(df.get("success_count", 0), errors="coerce").fillna(0),
+            name="Success",
+            mode="lines+markers",
+            line_color="#16a34a",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=pd.to_numeric(df.get("failed_count", 0), errors="coerce").fillna(0),
+            name="Failed",
+            mode="lines+markers",
+            line_color="#dc2626",
+        )
+    )
+    fig.update_layout(
+        title="Transactions Over Time",
+        height=340,
+        margin=dict(l=0, r=0, t=40, b=0),
+        xaxis_title="",
+        yaxis_title="Transaction Count",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+    )
+    return fig
+
+
+def payment_method_amounts_chart(data=None):
+    if data is None or len(data) == 0:
+        return placeholder_failure_distribution()
+
+    df = pd.DataFrame(data)
+    if df.empty or "payment_method" not in df.columns:
+        return placeholder_failure_distribution()
+
+    for col in ["total_amount"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    fig = px.bar(
+        df,
+        x="payment_method",
+        y="total_amount",
+        color="payment_method",
+        color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1", "#1d4ed8", "#0284c7", "#60a5fa"],
+        labels={"total_amount": "Total Amount ($)", "payment_method": "Payment Method"},
+    )
+    fig.update_layout(
+        title="Payment Methods (Total Amount)",
+        height=340,
+        margin=dict(l=0, r=0, t=40, b=0),
+        showlegend=False,
+        xaxis_tickangle=-20,
+    )
+    return fig
