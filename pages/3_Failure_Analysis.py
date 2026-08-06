@@ -1,4 +1,5 @@
 import sys
+from io import BytesIO, StringIO
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -20,16 +21,34 @@ from src.charts import (
     failure_breakdown_by_payment_method_chart,
     failure_causes_pie_chart,
     failure_causes_bar_chart,
+    recovery_score_distribution_chart,
 )
 
 from src.payment_queries import (
+    count_bank_response_codes,
+    get_bank_response_codes,
     get_filtered_failed_transactions,
     get_failure_type_distribution,
     get_failure_breakdown_by_response_code,
     get_failure_breakdown_by_gateway,
     get_failure_breakdown_by_payment_method,
     get_failure_causes_distribution,
+    get_recovery_score_distribution,
 )
+
+from src.numpy_utils import compute_distribution_stats
+
+
+count_bank_response_codes = st.cache_data(show_spinner=False, ttl=300)(count_bank_response_codes)
+get_bank_response_codes = st.cache_data(show_spinner=False, ttl=300)(get_bank_response_codes)
+get_failure_type_distribution = st.cache_data(show_spinner=False, ttl=300)(get_failure_type_distribution)
+get_recovery_score_distribution = st.cache_data(show_spinner=False, ttl=300)(get_recovery_score_distribution)
+get_filtered_failed_transactions = st.cache_data(show_spinner=False, ttl=300)(get_filtered_failed_transactions)
+get_failure_breakdown_by_response_code = st.cache_data(show_spinner=False, ttl=300)(get_failure_breakdown_by_response_code)
+get_failure_breakdown_by_gateway = st.cache_data(show_spinner=False, ttl=300)(get_failure_breakdown_by_gateway)
+get_failure_breakdown_by_payment_method = st.cache_data(show_spinner=False, ttl=300)(get_failure_breakdown_by_payment_method)
+get_failure_causes_distribution = st.cache_data(show_spinner=False, ttl=300)(get_failure_causes_distribution)
+
 
 # ----------------------------------------------------
 # Page Setup
@@ -102,6 +121,46 @@ with c3:
 
 st.divider()
 
+# ----------------------------------------------------
+# Recovery Potential Distribution (NumPy stats cards)
+# ----------------------------------------------------
+
+st.subheader("Recovery Potential Distribution")
+
+try:
+    score_dist_df = get_recovery_score_distribution()
+except Exception as error:
+    st.error(f"Unable to load recovery score distribution: {error}")
+    score_dist_df = pd.DataFrame([])
+
+if score_dist_df.empty:
+    st.info("No recovery score distribution available yet.")
+else:
+    try:
+        scores = pd.to_numeric(score_dist_df["recovery_score"], errors="coerce").dropna().to_numpy()
+    except Exception:
+        scores = None
+
+    if scores is not None and len(scores) > 0:
+        stats = compute_distribution_stats(scores)
+
+        rp_col1, rp_col2, rp_col3, rp_col4, rp_col5 = st.columns(5)
+        rp_col1.metric("Mean", f"{stats['mean']:.2f}")
+        rp_col2.metric("Median", f"{stats['median']:.2f}")
+        rp_col3.metric("25th", f"{stats['p25']:.2f}")
+        rp_col4.metric("75th", f"{stats['p75']:.2f}")
+        rp_col5.metric("90th", f"{stats['p90']:.2f}")
+
+        extra_r1, extra_r2 = st.columns(2)
+        extra_r1.metric("Std. Dev", f"{stats['std']:.2f}")
+        extra_r2.metric("Failures Scored", f"{int(stats['count']):,}")
+
+    with st.expander("Recovery Score Distribution Chart", expanded=False):
+        fig_score = recovery_score_distribution_chart(score_dist_df.to_dict("records"))
+        st.plotly_chart(fig_score, width="stretch")
+
+st.divider()
+
 with st.expander("🔍 Filter failed transactions", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -168,7 +227,110 @@ if not failed_transactions.empty:
             )
 
     st.subheader("Failed Transactions")
-    st.dataframe(failed_transactions, use_container_width=True, hide_index=True)
+    failed_display = failed_transactions.copy()
+
+    if "response_code" in failed_display.columns:
+        try:
+            total_codes = count_bank_response_codes() or 0
+            all_codes = []
+            page = 1
+            per_page = 500
+            while len(all_codes) < total_codes or total_codes == 0:
+                batch = get_bank_response_codes(page=page, limit=per_page) or []
+                if not batch:
+                    break
+                all_codes.extend(batch)
+                if len(batch) < per_page:
+                    break
+                page += 1
+                if page > 100:
+                    break
+            response_lookup = {
+                str(row.get("response_code", "")).strip(): {
+                    "recommended_action": row.get("recommended_action") or "",
+                    "bank_failure_type": row.get("failure_type") or "",
+                    "bank_recovery_potential": row.get("recovery_potential"),
+                    "bank_description": row.get("description") or "",
+                }
+                for row in all_codes
+                if row.get("response_code") is not None
+            }
+        except Exception:
+            response_lookup = {}
+
+        def _lookup_action(code):
+            if code is None:
+                return ""
+            hit = response_lookup.get(str(code).strip())
+            return hit.get("recommended_action", "") if hit else ""
+
+        def _lookup_failure_type(code):
+            if code is None:
+                return None
+            hit = response_lookup.get(str(code).strip())
+            if not hit:
+                return None
+            return hit.get("bank_failure_type") or None
+
+        def _lookup_desc(code):
+            if code is None:
+                return ""
+            hit = response_lookup.get(str(code).strip())
+            return hit.get("bank_description", "") if hit else ""
+
+        failed_display["recommended_action"] = failed_display["response_code"].apply(_lookup_action)
+        if "failure_type" not in failed_display.columns or not failed_display["failure_type"].notna().any():
+            enriched_ft = failed_display["response_code"].apply(_lookup_failure_type)
+            if enriched_ft.notna().any():
+                failed_display["failure_type"] = enriched_ft.fillna(failed_display.get("failure_type", pd.NA))
+        if not response_lookup:
+            st.caption(
+                "Tip: Upload bank_response_codes.csv via the CSV Import page to auto-enrich "
+                "recommended_action, failure classification, and recovery potential per code."
+            )
+    elif "recommended_action" not in failed_display.columns:
+        failed_display["recommended_action"] = ""
+
+    preferred_cols = [
+        "transaction_id", "customer_id", "amount", "currency",
+        "gateway", "payment_method", "response_code",
+        "failure_type", "recovery_potential", "recommended_action",
+        "initial_status", "final_status", "created_at",
+    ]
+    existing_pref = [c for c in preferred_cols if c in failed_display.columns]
+    other_cols = [c for c in failed_display.columns if c not in existing_pref]
+    keep_cols = existing_pref + other_cols
+    st.dataframe(failed_display[keep_cols], use_container_width=True, hide_index=True)
+
+    st.markdown("#### Export Failed Transactions")
+    fexp1, fexp2 = st.columns(2)
+    with fexp1:
+        csv_buffer = StringIO()
+        failed_display.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="📥 Failed Transactions (CSV)",
+            data=csv_buffer.getvalue(),
+            file_name="failed_transactions.csv",
+            mime="text/csv",
+            key="failed_txn_csv",
+        )
+    with fexp2:
+        excel_buffer = BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+            failed_display.to_excel(writer, index=False, sheet_name="FailedTransactions")
+            if "recovery_potential" in failed_transactions.columns:
+                hv_df = failed_transactions.loc[
+                    pd.to_numeric(failed_transactions["recovery_potential"], errors="coerce").fillna(0) >= 0.75
+                ].copy()
+                if not hv_df.empty:
+                    hv_df.to_excel(writer, index=False, sheet_name="HighValueCandidates")
+        st.download_button(
+            label="📥 Failed Transactions (Excel)",
+            data=excel_buffer.getvalue(),
+            file_name="failed_transactions.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="failed_txn_xlsx",
+        )
 else:
     st.info("No failed transactions found matching the selected filters.")
 

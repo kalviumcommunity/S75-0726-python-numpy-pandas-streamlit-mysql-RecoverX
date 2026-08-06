@@ -106,6 +106,37 @@ def get_retry_history(transaction_id, page=1, limit=10):
     rows = execute_query(query, params, fetch=True)
     return pd.DataFrame(rows or [])
 
+
+def get_retry_history_with_bank_details(transaction_id, limit=None):
+    if limit:
+        limit_clause = " LIMIT %s"
+        params = (transaction_id, int(limit))
+    else:
+        limit_clause = ""
+        params = (transaction_id,)
+    query = f"""
+    SELECT
+        pr.retry_id,
+        pr.transaction_id,
+        pr.attempt_number,
+        pr.retry_timestamp,
+        pr.retry_status,
+        pr.response_code,
+        pr.gateway_txn_ref,
+        pr.created_at,
+        COALESCE(brc.description, '') AS response_message,
+        COALESCE(brc.failure_type, '') AS failure_type,
+        COALESCE(brc.recommended_action, '') AS recommended_action,
+        COALESCE(brc.recovery_potential, 0) AS recovery_potential
+    FROM payment_retries pr
+    LEFT JOIN bank_response_codes brc ON pr.response_code = brc.response_code
+    WHERE pr.transaction_id = %s
+    ORDER BY pr.attempt_number ASC
+    {limit_clause}
+    """
+    rows = execute_query(query, params, fetch=True)
+    return pd.DataFrame(rows or [])
+
 def count_retry_history(transaction_id):
     query = """
     SELECT COUNT(*) AS total
@@ -377,6 +408,7 @@ def _alert_severity_for_rule(rule_type):
         "failure_rate": "HIGH",
         "success_rate": "HIGH",
         "response_trend": "MEDIUM",
+        "revenue_loss": "CRITICAL",
     }
     return mapping.get(rule_type, "LOW")
 
@@ -515,6 +547,14 @@ def generate_alerts_from_rules(start_date: str = None, end_date: str = None):
     success_rate = round((successful / total) * 100, 2) if total else 0.0
     response_trend = get_top_response_trend(start_date, end_date)
 
+    needs_revenue = any(rule["rule_type"] == "revenue_loss" for rule in rules)
+    revenue_summary = None
+    if needs_revenue:
+        try:
+            revenue_summary = get_revenue_recovery_summary(start_date, end_date)
+        except Exception:
+            revenue_summary = None
+
     created_alerts = []
 
     for rule in rules:
@@ -550,6 +590,20 @@ def generate_alerts_from_rules(start_date: str = None, end_date: str = None):
             message = (
                 f"Response code {response_trend['response_code']} ({response_trend['description']}) accounts for "
                 f"{response_trend['share']}% of failed retries, above the threshold of {rule['threshold_value']}%."
+            )
+        elif rule["rule_type"] == "revenue_loss" and revenue_summary:
+            recoverable = float(revenue_summary.get("recoverable_revenue", 0) or 0)
+            permanently_lost = float(revenue_summary.get("permanently_lost_revenue", 0) or 0)
+            total_at_risk = recoverable + permanently_lost
+            triggered = _evaluate_threshold(
+                total_at_risk,
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Revenue at risk is ${total_at_risk:,.2f} (${recoverable:,.2f} recoverable + "
+                f"${permanently_lost:,.2f} permanently lost), which {'exceeds' if rule['threshold_condition'] in ('>', '>=') else 'meets'} "
+                f"the threshold of ${float(rule['threshold_value'] or 0):,.2f}."
             )
 
         if triggered and message:
@@ -2170,3 +2224,155 @@ def get_resolved_alerts(start_date=None, end_date=None, severity=None):
         rows = []
 
     return pd.DataFrame(rows or [])
+
+
+def get_payment_method_amounts(start_date=None, end_date=None):
+    query = """
+    SELECT
+        COALESCE(t.payment_method, 'Unknown') AS payment_method,
+        CAST(COALESCE(SUM(t.amount), 0) AS DECIMAL(15,2)) AS total_amount,
+        COUNT(*) AS transaction_count
+    FROM transactions t
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+    query += " GROUP BY COALESCE(t.payment_method, 'Unknown') ORDER BY total_amount DESC"
+    rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
+    return pd.DataFrame(rows or [])
+
+
+def get_high_value_failed_transactions(limit=50, min_amount=0, start_date=None, end_date=None):
+    query = """
+    SELECT
+        t.transaction_id,
+        t.customer_id,
+        t.amount,
+        t.currency,
+        t.payment_method,
+        t.gateway,
+        t.created_at,
+        COALESCE(fc.failure_type, brc.failure_type) AS failure_type,
+        COALESCE(fc.recovery_score, brc.recovery_potential, 0) AS recovery_score,
+        COALESCE(brc.description, fc.root_cause) AS failure_description,
+        COALESCE(brc.recommended_action, '') AS recommended_action,
+        (
+            COALESCE(fc.recovery_score, brc.recovery_potential, 0)
+            * CAST(t.amount AS DECIMAL(15,2))
+        ) AS value_score
+    FROM transactions t
+    LEFT JOIN failure_classifications fc ON t.transaction_id = fc.transaction_id
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc ON lpr.response_code = brc.response_code
+    WHERE
+        (t.final_status IS NULL OR UPPER(t.final_status) != 'SUCCESS')
+        AND CAST(t.amount AS DECIMAL(15,2)) >= %s
+    """
+    params = [min_amount]
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+    query += " ORDER BY value_score DESC LIMIT %s"
+    params.append(limit)
+    rows = execute_query(query, tuple(params), fetch=True) or []
+    return pd.DataFrame(rows or [])
+
+
+def get_ineffective_retry_patterns(threshold_success_rate=20.0):
+    patterns = []
+    attempt_query = """
+    SELECT
+        attempt_number,
+        COUNT(*) AS total_attempts,
+        SUM(CASE WHEN UPPER(retry_status)='SUCCESS' THEN 1 ELSE 0 END) AS successful,
+        ROUND(
+            SUM(CASE WHEN UPPER(retry_status)='SUCCESS' THEN 1 ELSE 0 END)
+            / COUNT(*) * 100, 1
+        ) AS success_rate
+    FROM payment_retries
+    GROUP BY attempt_number
+    HAVING success_rate < %s
+    ORDER BY success_rate ASC
+    """
+    attempt_rows = execute_query(attempt_query, (threshold_success_rate,), fetch=True) or []
+    for row in attempt_rows:
+        patterns.append({
+            "category": "Attempt Number",
+            "pattern": f"Attempt #{row['attempt_number']}",
+            "total": int(row["total_attempts"]),
+            "successful": int(row["successful"] or 0),
+            "success_rate": float(row["success_rate"]),
+            "recommendation": f"Consider reducing or stopping retries on Attempt #{row['attempt_number']} — success rate is below {threshold_success_rate}%.",
+        })
+
+    gateway_query = """
+    SELECT
+        COALESCE(t.gateway, 'Unknown') AS gateway,
+        COUNT(*) AS total_attempts,
+        SUM(CASE WHEN UPPER(pr.retry_status)='SUCCESS' THEN 1 ELSE 0 END) AS successful,
+        ROUND(
+            SUM(CASE WHEN UPPER(pr.retry_status)='SUCCESS' THEN 1 ELSE 0 END)
+            / COUNT(*) * 100, 1
+        ) AS success_rate
+    FROM payment_retries pr
+    JOIN transactions t ON pr.transaction_id = t.transaction_id
+    GROUP BY COALESCE(t.gateway, 'Unknown')
+    HAVING success_rate < %s
+    ORDER BY success_rate ASC
+    """
+    gateway_rows = execute_query(gateway_query, (threshold_success_rate,), fetch=True) or []
+    for row in gateway_rows:
+        patterns.append({
+            "category": "Gateway",
+            "pattern": row["gateway"],
+            "total": int(row["total_attempts"]),
+            "successful": int(row["successful"] or 0),
+            "success_rate": float(row["success_rate"]),
+            "recommendation": f"Gateway '{row['gateway']}' has low retry success — investigate configuration or switch to a better-performing gateway.",
+        })
+
+    bank_query = """
+    SELECT
+        COALESCE(br.description, br.response_code) AS bank,
+        COUNT(*) AS total_attempts,
+        SUM(CASE WHEN UPPER(pr.retry_status)='SUCCESS' THEN 1 ELSE 0 END) AS successful,
+        ROUND(
+            SUM(CASE WHEN UPPER(pr.retry_status)='SUCCESS' THEN 1 ELSE 0 END)
+            / COUNT(*) * 100, 1
+        ) AS success_rate
+    FROM payment_retries pr
+    JOIN bank_response_codes br ON pr.response_code = br.response_code
+    GROUP BY COALESCE(br.description, br.response_code)
+    HAVING success_rate < %s
+    ORDER BY success_rate ASC
+    """
+    bank_rows = execute_query(bank_query, (threshold_success_rate,), fetch=True) or []
+    for row in bank_rows:
+        patterns.append({
+            "category": "Bank/Response Code",
+            "pattern": row["bank"],
+            "total": int(row["total_attempts"]),
+            "successful": int(row["successful"] or 0),
+            "success_rate": float(row["success_rate"]),
+            "recommendation": f"Transactions failing with '{row['bank']}' rarely succeed on retry — consider classifying as PERMANENT earlier.",
+        })
+
+    return patterns
