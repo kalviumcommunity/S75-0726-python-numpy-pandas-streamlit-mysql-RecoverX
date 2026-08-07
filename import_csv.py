@@ -9,7 +9,7 @@ from src.data_cleaning import (
     clean_transactions,
     clean_payment_retries,
     clean_bank_response_codes,
-    validate_import_dataframe,
+    dedupe_and_count,
 )
 
 load_dotenv()
@@ -37,15 +37,26 @@ def import_transactions_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
-        validation = validate_import_dataframe(df, "transactions")
-        if not validation["valid"]:
-            print("Validation failed for transactions CSV:", ", ".join(validation["errors"]))
-            return False
+        cleaned_df = clean_transactions(df)
+        dedup = dedupe_and_count(
+            cleaned_df,
+            table="transactions",
+            pk_columns=["transaction_id"],
+            connection_factory=connect_to_db,
+        )
+        deduped_df = dedup["df"]
+        skipped_in_file = dedup["skipped_in_file"]
+        skipped_in_db = dedup["skipped_in_db"]
 
-        cleaned_df = validation["cleaned_df"]
+        if len(deduped_df) == 0:
+            print("No transactions to import after dedup.")
+            if skipped_in_file or skipped_in_db:
+                print(f"  Skipped in-file: {skipped_in_file}, in-DB: {skipped_in_db}.")
+            return True
+
         cursor = connection.cursor()
 
-        for _, row in cleaned_df.iterrows():
+        for _, row in deduped_df.iterrows():
             cursor.execute("""
                 INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -59,7 +70,11 @@ def import_transactions_from_csv(csv_file_path):
 
         connection.commit()
         cursor.close()
-        print(f"Successfully imported {len(cleaned_df)} transactions!")
+        print(f"Successfully imported {len(deduped_df)} transactions!")
+        if skipped_in_file:
+            print(f"  Skipped {skipped_in_file} duplicate(s) found within the file.")
+        if skipped_in_db:
+            print(f"  Skipped {skipped_in_db} row(s) already present in the database.")
         return True
     except Exception as e:
         print(f"Error importing transactions: {e}")
@@ -76,15 +91,26 @@ def import_payment_retries_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
-        validation = validate_import_dataframe(df, "payment_retries")
-        if not validation["valid"]:
-            print("Validation failed for payment_retries CSV:", ", ".join(validation["errors"]))
-            return False
+        cleaned_df = clean_payment_retries(df)
+        dedup = dedupe_and_count(
+            cleaned_df,
+            table="payment_retries",
+            pk_columns=["transaction_id", "attempt_number"],
+            connection_factory=connect_to_db,
+        )
+        deduped_df = dedup["df"]
+        skipped_in_file = dedup["skipped_in_file"]
+        skipped_in_db = dedup["skipped_in_db"]
 
-        cleaned_df = validation["cleaned_df"]
+        if len(deduped_df) == 0:
+            print("No payment retries to import after dedup.")
+            if skipped_in_file or skipped_in_db:
+                print(f"  Skipped in-file: {skipped_in_file}, in-DB: {skipped_in_db}.")
+            return True
+
         cursor = connection.cursor()
 
-        for _, row in cleaned_df.iterrows():
+        for _, row in deduped_df.iterrows():
             cursor.execute("""
                 INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -95,7 +121,11 @@ def import_payment_retries_from_csv(csv_file_path):
 
         connection.commit()
         cursor.close()
-        print(f"Successfully imported {len(cleaned_df)} payment retries!")
+        print(f"Successfully imported {len(deduped_df)} payment retries!")
+        if skipped_in_file:
+            print(f"  Skipped {skipped_in_file} duplicate(s) found within the file.")
+        if skipped_in_db:
+            print(f"  Skipped {skipped_in_db} row(s) already present in the database.")
         return True
     except Exception as e:
         print(f"Error importing payment retries: {e}")
@@ -112,15 +142,26 @@ def import_bank_response_codes_from_csv(csv_file_path):
 
     try:
         df = pd.read_csv(csv_file_path)
-        validation = validate_import_dataframe(df, "bank_response_codes")
-        if not validation["valid"]:
-            print("Validation failed for bank_response_codes CSV:", ", ".join(validation["errors"]))
-            return False
+        cleaned_df = clean_bank_response_codes(df)
+        dedup = dedupe_and_count(
+            cleaned_df,
+            table="bank_response_codes",
+            pk_columns=["response_code"],
+            connection_factory=connect_to_db,
+        )
+        deduped_df = dedup["df"]
+        skipped_in_file = dedup["skipped_in_file"]
+        skipped_in_db = dedup["skipped_in_db"]
 
-        cleaned_df = validation["cleaned_df"]
+        if len(deduped_df) == 0:
+            print("No bank response codes to import after dedup.")
+            if skipped_in_file or skipped_in_db:
+                print(f"  Skipped in-file: {skipped_in_file}, in-DB: {skipped_in_db}.")
+            return True
+
         cursor = connection.cursor()
 
-        for _, row in cleaned_df.iterrows():
+        for _, row in deduped_df.iterrows():
             cursor.execute("""
                 INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -132,7 +173,11 @@ def import_bank_response_codes_from_csv(csv_file_path):
 
         connection.commit()
         cursor.close()
-        print(f"Successfully imported {len(cleaned_df)} bank response codes!")
+        print(f"Successfully imported {len(deduped_df)} bank response codes!")
+        if skipped_in_file:
+            print(f"  Skipped {skipped_in_file} duplicate(s) found within the file.")
+        if skipped_in_db:
+            print(f"  Skipped {skipped_in_db} row(s) already present in the database.")
         return True
     except Exception as e:
         print(f"Error importing bank response codes: {e}")

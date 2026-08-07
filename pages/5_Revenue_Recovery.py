@@ -6,6 +6,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import pandas as pd
 import streamlit as st
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
+from src.charts import placeholder_revenue_recovery
 
 from src.charts import (
     recovery_score_distribution_chart,
@@ -63,56 +65,9 @@ setup_page("Revenue Recovery Analytics", "💰")
 render_header()
 date_range = render_sidebar()
 
-st.subheader("Revenue Recovery Analytics")
-st.info(
-    """
-Quantify how much failed-payment value is still recoverable versus permanently lost.
-Prioritize retries on high-value, high-likelihood transactions first.
-"""
-)
+require_page_permission("Revenue Recovery")
 
-start_date_value = (
-    pd.Timestamp(date_range[0]).strftime("%Y-%m-%d 00:00:00")
-    if isinstance(date_range, tuple) and len(date_range) == 2 and date_range[0]
-    else None
-)
-end_date_value = (
-    pd.Timestamp(date_range[1]).strftime("%Y-%m-%d 23:59:59")
-    if isinstance(date_range, tuple) and len(date_range) == 2 and date_range[1]
-    else None
-)
-
-# =========================================================
-# KPI Cards
-# =========================================================
-
-st.subheader("Recovery KPI Overview")
-
-try:
-    summary = get_revenue_recovery_summary(
-        start_date=start_date_value,
-        end_date=end_date_value,
-    )
-except Exception as error:
-    st.error(f"Unable to load revenue recovery summary: {error}")
-    summary = {}
-
-recoverable = float(summary.get("recoverable_revenue", 0) or 0)
-permanently_lost = float(summary.get("permanently_lost_revenue", 0) or 0)
-total_at_risk = recoverable + permanently_lost
-successful_amount = float(summary.get("successful_revenue", 0) or 0)
-total_amount = float(summary.get("total_revenue", 0) or 0)
-recovered_so_far = float(summary.get("recovered_revenue", 0) or 0)
-recovery_pct = (recovered_so_far / total_at_risk * 100.0) if total_at_risk > 0 else 0.0
-overall_at_risk_pct = (total_at_risk / total_amount * 100.0) if total_amount > 0 else 0.0
-
-kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5 = st.columns(5)
-kpi_col1.metric("Recoverable Revenue", _fmt_money(recoverable))
-kpi_col2.metric("Permanently Lost", _fmt_money(permanently_lost))
-kpi_col3.metric("Total At Risk", _fmt_money(total_at_risk), f"{overall_at_risk_pct:.2f}% of total")
-kpi_col4.metric("Already Recovered", _fmt_money(recovered_so_far))
-kpi_col5.metric("Recovery Progress", _fmt_percent(recovery_pct))
-
+st.subheader("Identify and track recoverable revenue")
 st.divider()
 
 # =========================================================

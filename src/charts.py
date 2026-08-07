@@ -492,363 +492,172 @@ def retry_success_rate_per_attempt_chart(data=None):
     return fig
 
 
-def retry_success_heatmap_chart(data=None):
+def inter_retry_gap_histogram(data=None):
     """
-    Heatmap chart showing retry success rate by day of week and hour of day.
+    Histogram of time gaps between consecutive retries.
+    data is list of dicts from get_inter_retry_times().
     """
     if not data:
-        data = {
-            "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-            "hours": list(range(24)),
-            "values": [[0.0 for _ in range(24)] for _ in range(7)],
-        }
+        gaps = [1, 2, 2, 5, 5, 5, 10, 10, 15, 15, 30, 30, 45, 60, 60, 90, 120] * 5
+    else:
+        gaps = [int(d.get("gap_minutes", 0) or 0) for d in data]
 
-    days = data.get("days") or ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    hours = data.get("hours") or list(range(24))
-    values = data.get("values") or [[0.0 for _ in range(24)] for _ in range(7)]
-
-    matrix = []
-    for row in values:
-        if len(row) < len(hours):
-            row = list(row) + [0.0] * (len(hours) - len(row))
-        matrix.append([0.0 if value is None else float(value) for value in row[:len(hours)]])
-
-    if len(matrix) < len(days):
-        matrix.extend([[0.0 for _ in range(len(hours))] for _ in range(len(days) - len(matrix))])
-
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=matrix,
-            x=hours,
-            y=days,
-            colorscale="Viridis",
-            zmin=0,
-            zmax=100,
-            colorbar_title="Success %",
-            hovertemplate="Day: %{y}<br>Hour: %{x}<br>Success Rate: %{z}%<extra></extra>",
-        )
+    df = pd.DataFrame({"gap_minutes": gaps})
+    fig = px.histogram(
+        df,
+        x="gap_minutes",
+        nbins=20,
+        color_discrete_sequence=["#2563eb"],
+        title=None,
     )
-
     fig.update_layout(
-        title="Retry Success by Day and Hour",
-        height=420,
-        margin=dict(l=0, r=0, t=50, b=0),
-        xaxis_title="Hour of Day",
-        yaxis_title="Day of Week",
+        height=350,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis_title="Gap Between Retries (minutes)",
+        yaxis_title="Number of Retry Pairs",
+        bargap=0.1,
     )
-
     return fig
 
 
-def retry_timing_analysis_chart(data=None):
+def retry_success_by_hour_chart(data=None):
     """
-    Bar chart for retry timing windows such as 0-6 hrs, 6-12 hrs, and 24-48 hrs.
+    Bar chart of retry success rate by hour of day.
+    data is list of dicts from get_retry_success_by_hour().
     """
     if not data:
-        data = [
-            {"window": "0-6 hrs", "count": 18},
-            {"window": "6-12 hrs", "count": 12},
-            {"window": "12-24 hrs", "count": 8},
-            {"window": "24-48 hrs", "count": 5},
-            {"window": "48+ hrs", "count": 2},
-        ]
+        rows = []
+        for h in range(24):
+            total = 50 + ((h - 12) ** 2) * 2
+            ok = round(total * (0.3 + 0.4 * abs(12 - h) / 24 if h < 20 and h > 6 else 0.2))
+            rate = round((ok / total) * 100, 1) if total else 0.0
+            rows.append({"hour_of_day": h, "success_rate": rate, "total_attempts": total})
+        df = pd.DataFrame(rows)
+    else:
+        df = pd.DataFrame(data)
 
-    df = pd.DataFrame(data)
     if df.empty:
-        df = pd.DataFrame([{"window": "No data", "count": 0}])
+        rows = []
+        for h in range(24):
+            total = 50 + ((h - 12) ** 2) * 2
+            ok = round(total * (0.3 + 0.4 * abs(12 - h) / 24 if h < 20 and h > 6 else 0.2))
+            rate = round((ok / total) * 100, 1) if total else 0.0
+            rows.append({"hour_of_day": h, "success_rate": rate, "total_attempts": total})
+        df = pd.DataFrame(rows)
 
-    fig = px.bar(
-        df,
-        x="window",
-        y="count",
-        color="window",
-        color_discrete_sequence=px.colors.sequential.Blues,
-    )
-
-    fig.update_layout(
-        height=360,
-        title="Retry Timing Windows",
-        margin=dict(l=0, r=0, t=50, b=0),
-        xaxis_title="Time Window",
-        yaxis_title="Observed Retry Intervals",
-        showlegend=False,
-    )
-
-    return fig
-
-# ---------------------------------------------------------
-# Retry Performance by Gateway
-# ---------------------------------------------------------
-
-def retry_gateway_performance_chart(data=None):
-
-    if not data:
-        data = [
-            {
-                "gateway": "Stripe",
-                "total_retries": 450,
-                "successful": 340,
-                "success_rate": 75.6,
-            },
-            {
-                "gateway": "Razorpay",
-                "total_retries": 310,
-                "successful": 205,
-                "success_rate": 66.1,
-            },
-            {
-                "gateway": "PayU",
-                "total_retries": 260,
-                "successful": 165,
-                "success_rate": 63.5,
-            },
-        ]
-
-    df = pd.DataFrame(data)
+    df["hour_label"] = df["hour_of_day"].apply(lambda h: f"{h:02d}:00")
 
     fig = go.Figure()
-
-    fig.add_trace(
-        go.Bar(
-            x=df["gateway"],
-            y=df["total_retries"],
-            name="Retry Attempts",
-            marker_color="#2563eb",
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=df["gateway"],
-            y=df["success_rate"],
-            name="Success Rate (%)",
-            yaxis="y2",
-            mode="lines+markers+text",
-            text=[f"{x}%" for x in df["success_rate"]],
-            textposition="top center",
-            line=dict(color="#16a34a", width=3),
-        )
-    )
-
+    fig.add_trace(go.Bar(
+        x=df["hour_label"],
+        y=df["total_attempts"],
+        name="Total Attempts",
+        marker_color="#38bdf8",
+        hovertemplate="Hour %{x}<br>Total Attempts: %{y}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["hour_label"],
+        y=df["success_rate"],
+        name="Success Rate (%)",
+        mode="lines+markers",
+        yaxis="y2",
+        line_color="#16a34a",
+        marker=dict(color="#16a34a", size=7),
+        hovertemplate="Hour %{x}<br>Success Rate: %{y}%<extra></extra>",
+    ))
     fig.update_layout(
-        title="Retry Performance by Gateway",
-        height=400,
-        xaxis_title="Gateway",
-        yaxis_title="Retry Attempts",
-        yaxis2=dict(
-            title="Success Rate (%)",
-            overlaying="y",
-            side="right",
-            range=[0, 100],
-            showgrid=False,
-        ),
-        hovermode="x unified",
-    )
-
-    return fig
-
-# ---------------------------------------------------------
-# Retry Performance by Bank
-# ---------------------------------------------------------
-
-def retry_bank_performance_chart(data=None):
-
-    if not data:
-        data = [
-            {
-                "bank": "HDFC",
-                "total_retries": 500,
-                "successful": 390,
-                "success_rate": 78.0,
-            },
-            {
-                "bank": "ICICI",
-                "total_retries": 420,
-                "successful": 305,
-                "success_rate": 72.6,
-            },
-            {
-                "bank": "SBI",
-                "total_retries": 360,
-                "successful": 230,
-                "success_rate": 63.9,
-            },
-        ]
-
-    df = pd.DataFrame(data)
-
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Bar(
-            x=df["bank"],
-            y=df["total_retries"],
-            name="Retry Attempts",
-            marker_color="#f59e0b",
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=df["bank"],
-            y=df["success_rate"],
-            name="Success Rate (%)",
-            mode="lines+markers+text",
-            yaxis="y2",
-            text=[f"{x}%" for x in df["success_rate"]],
-            textposition="top center",
-            line=dict(color="#dc2626", width=3),
-        )
-    )
-
-    fig.update_layout(
-        title="Retry Performance by Bank",
-        height=400,
-        xaxis_title="Bank",
-        yaxis_title="Retry Attempts",
-        yaxis2=dict(
-            title="Success Rate (%)",
-            overlaying="y",
-            side="right",
-            range=[0, 100],
-            showgrid=False,
-        ),
-        hovermode="x unified",
-    )
-
-    return fig
-
-# ---------------------------------------------------------
-# Alert Severity Distribution
-# ---------------------------------------------------------
-
-def alert_severity_chart(data=None):
-
-    if not data:
-        data = [
-            {"severity": "LOW", "count": 4},
-            {"severity": "MEDIUM", "count": 7},
-            {"severity": "HIGH", "count": 5},
-            {"severity": "CRITICAL", "count": 2},
-        ]
-
-    df = pd.DataFrame(data)
-
-    fig = px.pie(
-        df,
-        names="severity",
-        values="count",
-        hole=0.45,
-        color="severity",
-        color_discrete_map={
-            "LOW": "#22c55e",
-            "MEDIUM": "#eab308",
-            "HIGH": "#f97316",
-            "CRITICAL": "#dc2626",
-        },
-    )
-
-    fig.update_traces(
-        textinfo="percent+label",
-        marker=dict(
-            line=dict(
-                color="white",
-                width=2,
-            )
-        ),
-    )
-
-    fig.update_layout(
-        title="Alert Severity Distribution",
         height=380,
-        margin=dict(
-            l=0,
-            r=0,
-            t=50,
-            b=0,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis=dict(title="Hour of Day", tickangle=-45),
+        yaxis=dict(title="Total Attempts", side="left"),
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 105],
+            showgrid=False,
         ),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=-0.15,
-            xanchor="center",
-            x=0.5,
+            y=1.02,
+            xanchor="right",
+            x=1,
         ),
+        hovermode="x unified",
     )
-
     return fig
 
 
-def transaction_status_over_time_chart(data=None):
-    if data is None or len(data) == 0:
-        return placeholder_transactions_overview()
+def retry_success_by_gap_chart(data=None):
+    """
+    Bar chart of retry success rate by gap bucket.
+    data is list of dicts from get_retry_success_by_gap().
+    """
+    if not data or not any(int(d.get("total_attempts", 0) or 0) > 0 for d in data):
+        data = [
+            {"gap_bucket": "0-1 min", "success_rate": 35.2, "total_attempts": 120, "successful": 42, "failed": 78},
+            {"gap_bucket": "1-5 min", "success_rate": 52.1, "total_attempts": 240, "successful": 125, "failed": 115},
+            {"gap_bucket": "5-15 min", "success_rate": 61.8, "total_attempts": 180, "successful": 111, "failed": 69},
+            {"gap_bucket": "15-30 min", "success_rate": 57.3, "total_attempts": 95, "successful": 54, "failed": 41},
+            {"gap_bucket": "30-60 min", "success_rate": 48.7, "total_attempts": 65, "successful": 31, "failed": 34},
+            {"gap_bucket": "60+ min", "success_rate": 41.5, "total_attempts": 40, "successful": 16, "failed": 24},
+        ]
 
     df = pd.DataFrame(data)
-    if df.empty or "date" not in df.columns:
-        return placeholder_transactions_overview()
-
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"]).sort_values("date")
-
     if df.empty:
-        return placeholder_transactions_overview()
+        data = [
+            {"gap_bucket": "0-1 min", "success_rate": 35.2, "total_attempts": 120, "successful": 42, "failed": 78},
+            {"gap_bucket": "1-5 min", "success_rate": 52.1, "total_attempts": 240, "successful": 125, "failed": 115},
+            {"gap_bucket": "5-15 min", "success_rate": 61.8, "total_attempts": 180, "successful": 111, "failed": 69},
+            {"gap_bucket": "15-30 min", "success_rate": 57.3, "total_attempts": 95, "successful": 54, "failed": 41},
+            {"gap_bucket": "30-60 min", "success_rate": 48.7, "total_attempts": 65, "successful": 31, "failed": 34},
+            {"gap_bucket": "60+ min", "success_rate": 41.5, "total_attempts": 40, "successful": 16, "failed": 24},
+        ]
+        df = pd.DataFrame(data)
 
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=df["date"],
-            y=pd.to_numeric(df.get("success_count", 0), errors="coerce").fillna(0),
-            name="Success",
-            mode="lines+markers",
-            line_color="#16a34a",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df["date"],
-            y=pd.to_numeric(df.get("failed_count", 0), errors="coerce").fillna(0),
-            name="Failed",
-            mode="lines+markers",
-            line_color="#dc2626",
-        )
-    )
+    fig.add_trace(go.Bar(
+        x=df["gap_bucket"],
+        y=df["total_attempts"],
+        name="Total Attempts",
+        marker_color="#0ea5e9",
+        hovertemplate="Gap %{x}<br>Total Attempts: %{y}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["gap_bucket"],
+        y=df["success_rate"],
+        name="Success Rate (%)",
+        mode="lines+markers+text",
+        yaxis="y2",
+        line_color="#16a34a",
+        line_width=3,
+        marker=dict(color="#16a34a", size=9),
+        text=[f"{v}%" for v in df["success_rate"]],
+        textposition="top center",
+        textfont=dict(color="#16a34a", size=11),
+        hovertemplate="Gap %{x}<br>Success Rate: %{y}%<extra></extra>",
+    ))
     fig.update_layout(
-        title="Transactions Over Time",
-        height=340,
-        margin=dict(l=0, r=0, t=40, b=0),
-        xaxis_title="",
-        yaxis_title="Transaction Count",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+        height=380,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis=dict(title="Gap Between Retries"),
+        yaxis=dict(title="Total Attempts", side="left"),
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 105],
+            showgrid=False,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+        hovermode="x unified",
     )
     return fig
 
-
-def payment_method_amounts_chart(data=None):
-    if data is None or len(data) == 0:
-        return placeholder_failure_distribution()
-
-    df = pd.DataFrame(data)
-    if df.empty or "payment_method" not in df.columns:
-        return placeholder_failure_distribution()
-
-    for col in ["total_amount"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-    fig = px.bar(
-        df,
-        x="payment_method",
-        y="total_amount",
-        color="payment_method",
-        color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1", "#1d4ed8", "#0284c7", "#60a5fa"],
-        labels={"total_amount": "Total Amount ($)", "payment_method": "Payment Method"},
-    )
-    fig.update_layout(
-        title="Payment Methods (Total Amount)",
-        height=340,
-        margin=dict(l=0, r=0, t=40, b=0),
-        showlegend=False,
-        xaxis_tickangle=-20,
-    )
-    return fig

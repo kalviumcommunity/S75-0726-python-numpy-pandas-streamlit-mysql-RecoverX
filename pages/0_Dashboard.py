@@ -67,82 +67,32 @@ def _highlight_status(val):
 
 import plotly.express as px
 import io
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
- 
-from src.payment_queries import get_dashboard_key_metrics
- main
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
+from src.payment_queries import get_total_transactions, get_successful_transactions, get_failed_transactions
 
-from src.payment_queries import (
-    get_total_transactions,
-    get_successful_transactions,
-    get_failed_transactions,
-    get_alerts,
-    get_failure_causes_distribution,
-)
+@st.cache_data(ttl=60)
+def _cached_get_total_transactions(start_date=None, end_date=None):
+    return get_total_transactions(start_date, end_date)
 
+@st.cache_data(ttl=60)
+def _cached_get_successful_transactions(start_date=None, end_date=None):
+    return get_successful_transactions(start_date, end_date)
 
-def render_recent_alerts(limit: int = 5):
-    """Render the most recent alerts in a compact table."""
-    st.subheader("Recent Alerts")
-    alerts = get_alerts(limit=limit) or []
+@st.cache_data(ttl=60)
+def _cached_get_failed_transactions(start_date=None, end_date=None):
+    return get_failed_transactions(start_date, end_date)
 
-    if not alerts:
-        st.info("No alerts yet.")
-        return
-
-    alert_rows = []
-    for alert in alerts:
-        created_at = alert.get("created_at")
-        if hasattr(created_at, "strftime"):
-            timestamp = created_at.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            timestamp = str(created_at or "N/A")
-
-        alert_rows.append(
-            {
-                "Alert Type": alert.get("alert_type") or "Unknown",
-                "Status": "Resolved" if alert.get("is_resolved") else "Unresolved",
-                "Timestamp": timestamp,
-            }
-        )
-
-    df_alerts = pd.DataFrame(alert_rows)
-    st.dataframe(df_alerts, use_container_width=True, hide_index=True)
-
-
-def render_top_failures(limit: int = 5):
-    """Render the most common failure reasons using the shared failure-cause query."""
-    st.subheader("Top Failures")
-    failure_causes = get_failure_causes_distribution() or []
-
-    if not failure_causes:
-        st.info("No failures recorded.")
-        return
-
-    failure_counts = pd.DataFrame(failure_causes)
-    if "cause" in failure_counts.columns and "count" in failure_counts.columns:
-        failure_counts = failure_counts.rename(columns={"cause": "Failure Reason", "count": "Count"})
-    else:
-        failure_counts = failure_counts.rename(columns={col: col for col in failure_counts.columns})
-
-    failure_counts = (
-        failure_counts.sort_values(by=["Count", "Failure Reason"], ascending=[False, True])
-        .head(limit)
-        .reset_index(drop=True)
-    )
-
-    if failure_counts.empty:
-        st.info("No failures recorded.")
-        return
-
-    st.dataframe(failure_counts, use_container_width=True, hide_index=True)
-
-
+get_total_transactions = _cached_get_total_transactions
+get_successful_transactions = _cached_get_successful_transactions
+get_failed_transactions = _cached_get_failed_transactions
 
 setup_page("Dashboard", "📊")
 render_header()
 date_range = render_sidebar()
 
+require_page_permission("Dashboard")
+
+# --- Metrics Cards ---
 st.subheader("Key Metrics")
 
 start_date_value = (

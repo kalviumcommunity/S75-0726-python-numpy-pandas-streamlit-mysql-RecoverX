@@ -8,12 +8,12 @@ import mysql.connector
 from mysql.connector import Error
 from dotenv import load_dotenv
 import os
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
 from src.data_cleaning import (
     clean_transactions,
     clean_payment_retries,
     clean_bank_response_codes,
-    validate_import_dataframe,
+    dedupe_and_count,
 )
 
 load_dotenv()
@@ -35,13 +35,26 @@ def connect_to_db():
 def import_transactions(df):
     connection = connect_to_db()
     if not connection:
-        return False
+        return False, 0, 0, 0
 
     try:
-        # Clean the data
         cleaned_df = clean_transactions(df)
+        # Dedup: reject PK duplicates (in-file + in-DB)
+        dedup = dedupe_and_count(
+            cleaned_df,
+            table="transactions",
+            pk_columns=["transaction_id"],
+            connection_factory=connect_to_db,
+        )
+        deduped_df = dedup["df"]
+        skipped_in_file = dedup["skipped_in_file"]
+        skipped_in_db = dedup["skipped_in_db"]
+
+        if len(deduped_df) == 0:
+            return True, 0, skipped_in_file, skipped_in_db
+
         cursor = connection.cursor()
-        for _, row in cleaned_df.iterrows():
+        for _, row in deduped_df.iterrows():
             cursor.execute("""
                 INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -54,10 +67,10 @@ def import_transactions(df):
             ))
         connection.commit()
         cursor.close()
-        return True, len(cleaned_df)
+        return True, len(deduped_df), skipped_in_file, skipped_in_db
     except Exception as e:
         st.error(f"Error importing transactions: {e}")
-        return False, 0
+        return False, 0, 0, 0
     finally:
         if connection and connection.is_connected():
             connection.close()
@@ -65,13 +78,26 @@ def import_transactions(df):
 def import_payment_retries(df):
     connection = connect_to_db()
     if not connection:
-        return False, 0
+        return False, 0, 0, 0
 
     try:
-        # Clean the data
         cleaned_df = clean_payment_retries(df)
+        # Dedup on natural key (transaction_id, attempt_number)
+        dedup = dedupe_and_count(
+            cleaned_df,
+            table="payment_retries",
+            pk_columns=["transaction_id", "attempt_number"],
+            connection_factory=connect_to_db,
+        )
+        deduped_df = dedup["df"]
+        skipped_in_file = dedup["skipped_in_file"]
+        skipped_in_db = dedup["skipped_in_db"]
+
+        if len(deduped_df) == 0:
+            return True, 0, skipped_in_file, skipped_in_db
+
         cursor = connection.cursor()
-        for _, row in cleaned_df.iterrows():
+        for _, row in deduped_df.iterrows():
             cursor.execute("""
                 INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -81,10 +107,10 @@ def import_payment_retries(df):
             ))
         connection.commit()
         cursor.close()
-        return True, len(cleaned_df)
+        return True, len(deduped_df), skipped_in_file, skipped_in_db
     except Exception as e:
         st.error(f"Error importing payment retries: {e}")
-        return False, 0
+        return False, 0, 0, 0
     finally:
         if connection and connection.is_connected():
             connection.close()
@@ -92,13 +118,25 @@ def import_payment_retries(df):
 def import_bank_response_codes(df):
     connection = connect_to_db()
     if not connection:
-        return False, 0
+        return False, 0, 0, 0
 
     try:
-        # Clean the data
         cleaned_df = clean_bank_response_codes(df)
+        dedup = dedupe_and_count(
+            cleaned_df,
+            table="bank_response_codes",
+            pk_columns=["response_code"],
+            connection_factory=connect_to_db,
+        )
+        deduped_df = dedup["df"]
+        skipped_in_file = dedup["skipped_in_file"]
+        skipped_in_db = dedup["skipped_in_db"]
+
+        if len(deduped_df) == 0:
+            return True, 0, skipped_in_file, skipped_in_db
+
         cursor = connection.cursor()
-        for _, row in cleaned_df.iterrows():
+        for _, row in deduped_df.iterrows():
             cursor.execute("""
                 INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -109,10 +147,10 @@ def import_bank_response_codes(df):
             ))
         connection.commit()
         cursor.close()
-        return True, len(cleaned_df)
+        return True, len(deduped_df), skipped_in_file, skipped_in_db
     except Exception as e:
         st.error(f"Error importing bank response codes: {e}")
-        return False, 0
+        return False, 0, 0, 0
     finally:
         if connection and connection.is_connected():
             connection.close()
@@ -121,31 +159,9 @@ setup_page("CSV Import", "📥")
 render_header()
 date_range = render_sidebar()
 
-# ---------------------------------------------------------
-# Header
-# ---------------------------------------------------------
+require_page_permission("CSV Import")
 
-st.subheader("CSV Import Center")
-
-st.info(
-    """
-Import transaction data directly into the RecoverX database.
-
-Supported tables:
-
-• Transactions
-
-• Payment Retries
-
-• Bank Response Codes
-"""
-)
-
-refresh = st.button("🔄 Refresh")
-
-if refresh:
-    st.rerun()
-
+st.subheader("Import CSV data into the RecoverX database")
 st.divider()
 
  frontend_changes
@@ -293,254 +309,20 @@ if st.button("📥 Import Data", type="primary", disabled=not validation_state.g
         count = 0
         success = False
         if table == "transactions":
-            connection = connect_to_db()
-            if connection:
-                try:
-                    cursor = connection.cursor()
-                    for _, row in cleaned_to_import.iterrows():
-                        cursor.execute("""
-                            INSERT INTO transactions (transaction_id, customer_id, amount, currency, payment_method, gateway, initial_status, final_status, created_at, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            row['transaction_id'], row['customer_id'], row['amount'], row.get('currency', 'USD'),
-                            row.get('payment_method', None), row.get('gateway', None), row['initial_status'],
-                            row.get('final_status', None),
-                            pd.to_datetime(row['created_at']),
-                            pd.to_datetime(row.get('updated_at', row['created_at']))
-                        ))
-                    connection.commit()
-                    count = len(cleaned_to_import)
-                    success = True
-                    cursor.close()
-                except Exception as e:
-                    st.error(f"Error importing transactions: {e}")
-                finally:
-                    if connection.is_connected():
-                        connection.close()
+            success, count, skipped_file, skipped_db = import_transactions(df)
         elif table == "payment_retries":
-            connection = connect_to_db()
-            if connection:
-                try:
-                    cursor = connection.cursor()
-                    for _, row in cleaned_to_import.iterrows():
-                        cursor.execute("""
-                            INSERT INTO payment_retries (transaction_id, attempt_number, retry_timestamp, retry_status, response_code, response_message)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (
-                            row['transaction_id'], row['attempt_number'], pd.to_datetime(row['retry_timestamp']),
-                            row['retry_status'], row.get('response_code', None), row.get('response_message', None)
-                        ))
-                    connection.commit()
-                    count = len(cleaned_to_import)
-                    success = True
-                    cursor.close()
-                except Exception as e:
-                    st.error(f"Error importing payment retries: {e}")
-                finally:
-                    if connection.is_connected():
-                        connection.close()
+            success, count, skipped_file, skipped_db = import_payment_retries(df)
         elif table == "bank_response_codes":
-            connection = connect_to_db()
-            if connection:
-                try:
-                    cursor = connection.cursor()
-                    for _, row in cleaned_to_import.iterrows():
-                        cursor.execute("""
-                            INSERT INTO bank_response_codes (response_code, bank_name, description, failure_type, recovery_potential, recommended_action)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (
-                            row['response_code'], row.get('bank_name', None), row['description'],
-                            row['failure_type'], row.get('recovery_potential', None),
-                            row.get('recommended_action', None)
-                        ))
-                    connection.commit()
-                    count = len(cleaned_to_import)
-                    success = True
-                    cursor.close()
-                except Exception as e:
-                    st.error(f"Error importing bank response codes: {e}")
-                finally:
-                    if connection.is_connected():
-                        connection.close()
+            success, count, skipped_file, skipped_db = import_bank_response_codes(df)
 
         if success:
-            st.success(f"✅ Successfully imported {count} valid record(s) into `{table}`!")
-            st.balloons()
-
-# ---------------------------------------------------------
-# Import Configuration
-# ---------------------------------------------------------
-
-left, right = st.columns([1, 2])
-
-with left:
-
-    table = st.selectbox(
-        "Destination Table",
-        [
-            "transactions",
-            "payment_retries",
-            "bank_response_codes",
-        ],
-    )
-
-with right:
-
-    uploaded_file = st.file_uploader(
-        "📂 Drag & Drop your CSV here",
-        type=["csv"],
-        help="Only CSV files are supported.",
-    )
-
-# ---------------------------------------------------------
-# File Details
-# ---------------------------------------------------------
-
-if uploaded_file is not None:
-
-    file_size = uploaded_file.size / 1024
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "Filename",
-        uploaded_file.name,
-    )
-
-    c2.metric(
-        "Size",
-        f"{file_size:.1f} KB",
-    )
-
-    c3.metric(
-        "Destination",
-        table,
-    )
-
-    st.divider()
-
-# ---------------------------------------------------------
-# CSV Preview
-# ---------------------------------------------------------
-
-if uploaded_file is not None:
-
-    df = pd.read_csv(uploaded_file)
-
-    st.subheader("CSV Preview")
-
-    st.dataframe(
-        df.head(10),
-        hide_index=True,
-        width="stretch",
-    )
-
-# ---------------------------------------------------------
-# CSV Validation
-# ---------------------------------------------------------
-
-    validation = validate_import_dataframe(df, table)
-
-    st.divider()
-
-    st.subheader("Validation Report")
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Rows Uploaded",
-        len(df)
-    )
-
-    col2.metric(
-        "Valid Rows",
-        validation["cleaned_rows"]
-    )
-
-    col3.metric(
-        "Dropped Rows",
-        validation["invalid_rows"]
-    )
-
-    st.divider()
-
-    # ---------------------------------------------------------
-    # Required Columns
-    # ---------------------------------------------------------
-
-    if validation["missing_columns"]:
-
-        st.error(
-            "Missing Required Columns:\n\n"
-            + ", ".join(validation["missing_columns"])
-        )
-
-    else:
-
-        st.success("✅ All required columns are present.")
-
-    # ---------------------------------------------------------
-    # Cleaned Data Preview
-    # ---------------------------------------------------------
-
-    if validation["valid"]:
-
-        st.subheader("Cleaned Data Preview")
-
-        st.dataframe(
-            validation["cleaned_df"].head(10),
-            hide_index=True,
-            width="stretch",
-        )
-
-    if validation["invalid_rows"]:
-
-        st.warning(
-            f"{validation['invalid_rows']} invalid rows were removed during cleaning."
-        )
-
-    st.divider()
-
-    if st.button("🚀 Import Data"):
-
-        if not validation["valid"]:
-
-            st.error("Import blocked. Please fix the CSV first.")
-
-        else:
-
-            with st.spinner("Importing data into database..."):
-
-                if table == "transactions":
-
-                    success, count = import_transactions(
-                        validation["cleaned_df"]
-                    )
-
-                elif table == "payment_retries":
-
-                    success, count = import_payment_retries(
-                        validation["cleaned_df"]
-                    )
-
-                else:
-
-                    success, count = import_bank_response_codes(
-                        validation["cleaned_df"]
-                    )
-
-            if success:
-
-                st.success(
-                    f"🎉 Successfully imported {count} records!"
-                )
-
-                st.balloons()
-
-            else:
-
-                st.error("Import failed.")
- main
+            total_skipped = skipped_file + skipped_db
+            lines = [f"Successfully imported **{count}** records!"]
+            if skipped_file:
+                lines.append(f"• Skipped {skipped_file} duplicate(s) within file (same PK kept last)")
+            if skipped_db:
+                lines.append(f"• Skipped {skipped_db} duplicate(s) already in database")
+            st.success("  \n".join(lines))
 
 st.divider()
 

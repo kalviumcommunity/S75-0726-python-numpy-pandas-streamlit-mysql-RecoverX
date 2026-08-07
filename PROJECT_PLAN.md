@@ -124,3 +124,10 @@ This plan covers all remaining features for RecoverX, a payment analytics platfo
 - ✅ All tests passing
 - ✅ Documentation complete
 - ✅ Demo ready
+- ✅ Single entrypoint: root `app.py` is the RecoverX landing page; Dashboard lives in `pages/0_Dashboard.py` only
+- ✅ Dashboard query: `get_payment_method_amounts(start_date, end_date)` returns sum(amount) grouped by payment_method
+- ✅ Revenue Recovery query: `get_high_value_failed_transactions(limit, min_amount, start_date, end_date)` ordered by (recovery_score * amount) DESC
+- ✅ Retry Analytics query: `get_ineffective_retry_patterns(threshold_success_rate)` finds banks/gateways/attempts below threshold
+- ✅ Revenue Recovery summary: `get_revenue_recovery_summary(start_date, end_date)` used by alert rules
+- ✅ Alerts engine: `generate_alerts_from_rules()` supports `revenue_loss` rule type (triggers when recoverable_revenue >= threshold)
+- ✅ Convenience wrapper: `generate_all_alerts(start_date, end_date)` runs default rules and returns active alerts + count

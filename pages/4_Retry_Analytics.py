@@ -4,48 +4,41 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
-
-from src.ui_components import (
-    setup_page,
-    render_header,
-    render_sidebar,
-    render_footer,
-)
-
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
 from src.charts import (
     placeholder_retry_attempts,
     retry_success_rate_per_attempt_chart,
-    retry_success_heatmap_chart,
-    retry_timing_analysis_chart,
-    retry_gateway_performance_chart,
-    retry_bank_performance_chart,
+    inter_retry_gap_histogram,
+    retry_success_by_hour_chart,
+    retry_success_by_gap_chart,
 )
-
 from src.payment_queries import (
     get_retry_success_rate_per_attempt,
-    get_retry_success_by_time_heatmap,
-    get_retry_timing_analysis,
-    get_retry_gateway_performance,
-    get_retry_bank_performance,
-    get_prioritized_transactions_to_retry,
-    get_retry_attempts_distribution,
-    get_ineffective_retry_patterns,
+    get_inter_retry_times,
+    get_retry_success_by_hour,
+    get_retry_success_by_gap,
 )
 
+@st.cache_data(ttl=60)
+def _cached_get_retry_success_rate_per_attempt(start_date=None, end_date=None):
+    return get_retry_success_rate_per_attempt(start_date, end_date)
 
-get_retry_success_rate_per_attempt = st.cache_data(show_spinner=False, ttl=300)(get_retry_success_rate_per_attempt)
-get_retry_success_by_time_heatmap = st.cache_data(show_spinner=False, ttl=300)(get_retry_success_by_time_heatmap)
-get_retry_timing_analysis = st.cache_data(show_spinner=False, ttl=300)(get_retry_timing_analysis)
-get_retry_gateway_performance = st.cache_data(show_spinner=False, ttl=300)(get_retry_gateway_performance)
-get_retry_bank_performance = st.cache_data(show_spinner=False, ttl=300)(get_retry_bank_performance)
-get_prioritized_transactions_to_retry = st.cache_data(show_spinner=False, ttl=300)(get_prioritized_transactions_to_retry)
-get_retry_attempts_distribution = st.cache_data(show_spinner=False, ttl=300)(get_retry_attempts_distribution)
-get_ineffective_retry_patterns = st.cache_data(show_spinner=False, ttl=300)(get_ineffective_retry_patterns)
+@st.cache_data(ttl=60)
+def _cached_get_inter_retry_times(start_date=None, end_date=None):
+    return get_inter_retry_times(start_date, end_date)
 
+@st.cache_data(ttl=60)
+def _cached_get_retry_success_by_hour(start_date=None, end_date=None):
+    return get_retry_success_by_hour(start_date, end_date)
 
-# ----------------------------------------------------
-# Page Setup
-# ----------------------------------------------------
+@st.cache_data(ttl=60)
+def _cached_get_retry_success_by_gap(start_date=None, end_date=None, bin_width_minutes=5):
+    return get_retry_success_by_gap(start_date, end_date, bin_width_minutes)
+
+get_retry_success_rate_per_attempt = _cached_get_retry_success_rate_per_attempt
+get_inter_retry_times = _cached_get_inter_retry_times
+get_retry_success_by_hour = _cached_get_retry_success_by_hour
+get_retry_success_by_gap = _cached_get_retry_success_by_gap
 
 setup_page("Retry Analytics", "🔁")
 render_header()
@@ -69,12 +62,13 @@ and bank-level retry analytics.
 if st.button("🔄 Refresh Data"):
     st.rerun()
 
+require_page_permission("Retry Analytics")
+
+st.subheader("Analyze retry performance")
 st.divider()
 
-# ----------------------------------------------------
-# Retry Success KPIs
-# ----------------------------------------------------
-
+# --- Retry Success Rates per Attempt ---
+st.subheader("Retry Success Rates per Attempt")
 success_data = get_retry_success_rate_per_attempt()
 
 if success_data:
@@ -347,35 +341,7 @@ else:
 
 st.divider()
 
-st.subheader("Prioritized Transactions to Retry")
-
-df_prioritized = get_prioritized_transactions_to_retry(
-    start_date=start_date,
-    end_date=end_date,
-)
-
-if not df_prioritized.empty:
-    st.dataframe(
-        df_prioritized,
-        hide_index=True,
-        width="stretch",
-        height=350,
-    )
-    st.download_button(
-        "Download Prioritized Transactions CSV",
-        df_prioritized.to_csv(index=False),
-        "prioritized_transactions_to_retry.csv",
-        "text/csv",
-    )
-else:
-    st.info("No eligible transactions found to prioritize for retry.")
-
-st.divider()
-
-# ----------------------------------------------------
-# Retry Attempts Distribution
-# ----------------------------------------------------
-
+# --- Retry Attempts Distribution ---
 st.subheader("Retry Attempts Distribution")
 
 try:
@@ -739,5 +705,83 @@ st.divider()
 # ----------------------------------------------------
 # Footer
 # ----------------------------------------------------
+
+st.divider()
+
+# -----------------------------
+# Retry Timing Analysis
+# -----------------------------
+st.subheader("⏱️  Retry Timing Analysis")
+st.markdown("Analyze time between retries and identify best retry windows")
+
+# ---- Average time between retries ----
+gap_data = get_inter_retry_times()
+gap_success_data = get_retry_success_by_gap()
+hour_data = get_retry_success_by_hour()
+
+if gap_data:
+    gap_minutes_list = [int(d.get("gap_minutes", 0) or 0) for d in gap_data]
+    if gap_minutes_list:
+        avg_gap_min = round(sum(gap_minutes_list) / len(gap_minutes_list), 1)
+        median_gap_min = pd.Series(gap_minutes_list).median()
+        min_gap_min = min(gap_minutes_list)
+        max_gap_min = max(gap_minutes_list)
+        num_gaps = len(gap_minutes_list)
+
+        tcol1, tcol2, tcol3, tcol4, tcol5 = st.columns(5)
+        tcol1.metric("# of Inter-Retry Gaps", f"{num_gaps:,}")
+        tcol2.metric("Average Gap", f"{avg_gap_min} min")
+        tcol3.metric("Median Gap", f"{median_gap_min} min")
+        tcol4.metric("Min Gap", f"{min_gap_min} min")
+        tcol5.metric("Max Gap", f"{max_gap_min} min")
+
+st.divider()
+
+# ---- Distribution of gaps ----
+st.subheader("Gap Distribution Between Consecutive Retries")
+fig_gaps = inter_retry_gap_histogram(gap_data)
+st.plotly_chart(fig_gaps, width='stretch')
+
+st.divider()
+
+# ---- Best retry windows: by gap bucket + by hour ----
+st.subheader("🎯 Best Retry Windows")
+
+gap_col, hour_col = st.columns(2)
+
+with gap_col:
+    st.markdown("#### By Time Gap")
+    fig_gap_success = retry_success_by_gap_chart(gap_success_data)
+    st.plotly_chart(fig_gap_success, width='stretch')
+    # Best gap bucket
+    if gap_success_data:
+        best_gap = max(
+            gap_success_data,
+            key=lambda d: float(d.get("success_rate", 0) or 0),
+        )
+        st.success(
+            f"💡 Best gap: **{best_gap['gap_bucket']}** with "
+            f"**{float(best_gap['success_rate'])}%** success rate "
+            f"({int(best_gap.get('total_attempts',0) or 0)} attempts)"
+        )
+
+with hour_col:
+    st.markdown("#### By Hour of Day")
+    fig_hour = retry_success_by_hour_chart(hour_data)
+    st.plotly_chart(fig_hour, width='stretch')
+    # Best hour
+    if hour_data:
+        filtered_hours = [h for h in hour_data if int(h.get("total_attempts", 0) or 0) > 0]
+        if filtered_hours:
+            best_hour = max(
+                filtered_hours,
+                key=lambda d: float(d.get("success_rate", 0) or 0),
+            )
+            h = int(best_hour["hour_of_day"])
+            st.success(
+                f"💡 Best hour: **{h:02d}:00 – {h+1:02d}:00** with "
+                f"**{float(best_hour['success_rate'])}%** success rate "
+                f"({int(best_hour.get('total_attempts',0) or 0)} attempts)"
+            )
 
 render_footer()

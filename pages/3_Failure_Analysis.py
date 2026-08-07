@@ -12,6 +12,7 @@ from src.ui_components import (
     render_header,
     render_sidebar,
     render_footer,
+    require_page_permission,
 )
 
 from src.charts import (
@@ -36,19 +37,38 @@ from src.payment_queries import (
     get_recovery_score_distribution,
 )
 
-from src.numpy_utils import compute_distribution_stats
+@st.cache_data(ttl=60)
+def _cached_get_filtered_failed_transactions(start_date=None, end_date=None,
+                                            failure_type=None, limit=100, offset=0):
+    return get_filtered_failed_transactions(start_date, end_date,
+                                           failure_type, limit, offset)
 
+@st.cache_data(ttl=60)
+def _cached_get_failure_type_distribution(start_date=None, end_date=None):
+    return get_failure_type_distribution(start_date, end_date)
 
-count_bank_response_codes = st.cache_data(show_spinner=False, ttl=300)(count_bank_response_codes)
-get_bank_response_codes = st.cache_data(show_spinner=False, ttl=300)(get_bank_response_codes)
-get_failure_type_distribution = st.cache_data(show_spinner=False, ttl=300)(get_failure_type_distribution)
-get_recovery_score_distribution = st.cache_data(show_spinner=False, ttl=300)(get_recovery_score_distribution)
-get_filtered_failed_transactions = st.cache_data(show_spinner=False, ttl=300)(get_filtered_failed_transactions)
-get_failure_breakdown_by_response_code = st.cache_data(show_spinner=False, ttl=300)(get_failure_breakdown_by_response_code)
-get_failure_breakdown_by_gateway = st.cache_data(show_spinner=False, ttl=300)(get_failure_breakdown_by_gateway)
-get_failure_breakdown_by_payment_method = st.cache_data(show_spinner=False, ttl=300)(get_failure_breakdown_by_payment_method)
-get_failure_causes_distribution = st.cache_data(show_spinner=False, ttl=300)(get_failure_causes_distribution)
+@st.cache_data(ttl=60)
+def _cached_get_failure_breakdown_by_response_code(start_date=None, end_date=None, failure_type=None, limit=50):
+    return get_failure_breakdown_by_response_code(start_date, end_date, failure_type, limit)
 
+@st.cache_data(ttl=60)
+def _cached_get_failure_breakdown_by_gateway(start_date=None, end_date=None, failure_type=None):
+    return get_failure_breakdown_by_gateway(start_date, end_date, failure_type)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_breakdown_by_payment_method(start_date=None, end_date=None, failure_type=None):
+    return get_failure_breakdown_by_payment_method(start_date, end_date, failure_type)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_causes_distribution(start_date=None, end_date=None):
+    return get_failure_causes_distribution(start_date, end_date)
+
+get_filtered_failed_transactions = _cached_get_filtered_failed_transactions
+get_failure_type_distribution = _cached_get_failure_type_distribution
+get_failure_breakdown_by_response_code = _cached_get_failure_breakdown_by_response_code
+get_failure_breakdown_by_gateway = _cached_get_failure_breakdown_by_gateway
+get_failure_breakdown_by_payment_method = _cached_get_failure_breakdown_by_payment_method
+get_failure_causes_distribution = _cached_get_failure_causes_distribution
 
 # ----------------------------------------------------
 # Page Setup
@@ -57,6 +77,8 @@ get_failure_causes_distribution = st.cache_data(show_spinner=False, ttl=300)(get
 setup_page("Failure Analysis", "❌")
 render_header()
 date_range = render_sidebar()
+
+require_page_permission("Failure Analysis")
 
 st.subheader("Analyze Payment Failure Patterns")
 
