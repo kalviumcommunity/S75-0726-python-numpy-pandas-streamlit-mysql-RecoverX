@@ -55,7 +55,7 @@ with chart_col1:
                      color_discrete_sequence=["#16a34a", "#dc2626"],
                      labels={"date": "Date", "value": "Count", "variable": "Status"})
         fig.update_layout(height=350, margin={"l": 0, "r": 0, "t": 30, "b": 0})
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No transaction status data available yet.")
 
@@ -72,7 +72,7 @@ with chart_col2:
         fig = px.bar(retry_counts, x="Attempts", y="Transactions", color="Attempts", 
                      color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1", "#0c4a6e"])
         fig.update_layout(height=350, margin={"l": 0, "r": 0, "t": 30, "b": 0}, showlegend=False)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No retry attempts data available yet.")
 
@@ -108,7 +108,7 @@ except Exception as error:
 if not transactions.empty:
     df_transactions = transactions
     st.caption(f"Showing {len(df_transactions)} of {total_transactions} matching transactions.")
-    st.dataframe(df_transactions, width='stretch')
+    st.dataframe(df_transactions, use_container_width=True)
 
     # --- CSV + Excel Export for Filtered Transactions ---
     st.markdown("#### Exports")
@@ -236,7 +236,7 @@ if not transactions.empty:
             ),
             showlegend=False
         )
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
         
         # --- Per-transaction retry details with response codes ---
         st.subheader("Details")

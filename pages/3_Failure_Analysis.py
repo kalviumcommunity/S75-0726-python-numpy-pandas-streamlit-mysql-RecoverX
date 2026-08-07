@@ -34,6 +34,7 @@ from src.payment_queries import (
     get_failure_breakdown_by_payment_method,
     get_failure_causes_distribution,
     get_recovery_score_distribution,
+    get_recovery_score_buckets,
 )
 
 from src.numpy_utils import compute_distribution_stats
@@ -156,8 +157,8 @@ else:
         extra_r2.metric("Failures Scored", f"{int(stats['count']):,}")
 
     with st.expander("Recovery Score Distribution Chart", expanded=False):
-        fig_score = recovery_score_distribution_chart(score_dist_df.to_dict("records"))
-        st.plotly_chart(fig_score, width="stretch")
+        fig_score = recovery_score_distribution_chart(get_recovery_score_buckets())
+        st.plotly_chart(fig_score, use_container_width=True)
 
 st.divider()
 
@@ -351,7 +352,7 @@ with left:
     if distribution:
 
         fig = failure_type_distribution_chart(distribution)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     else:
         st.info("No failure data available.")
@@ -403,7 +404,7 @@ with right:
     st.dataframe(
         summary,
         hide_index=True,
-        width="stretch"
+        use_container_width=True
     )
 
 st.success("### Recovery Insights")
@@ -443,7 +444,7 @@ if response_code_data:
 
     st.plotly_chart(
         fig,
-        width="stretch"
+        use_container_width=True
     )
 
     with st.expander("View Response Code Data"):
@@ -452,7 +453,7 @@ if response_code_data:
 
         st.dataframe(
             df,
-            width="stretch"
+            use_container_width=True
         )
 
         st.download_button(
@@ -486,11 +487,11 @@ if failure_causes_data:
 
     with pie_col:
         fig_pie = failure_causes_pie_chart(failure_causes_data)
-        st.plotly_chart(fig_pie, width="stretch")
+        st.plotly_chart(fig_pie, use_container_width=True)
 
     with bar_col:
         fig_bar = failure_causes_bar_chart(failure_causes_data)
-        st.plotly_chart(fig_bar, width="stretch")
+        st.plotly_chart(fig_bar, use_container_width=True)
 
     with st.expander("View Failure Causes Data"):
 
@@ -506,7 +507,7 @@ if failure_causes_data:
 
         st.dataframe(
             df_causes,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -554,7 +555,7 @@ with left:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
         with st.expander("View Gateway Data"):
@@ -563,7 +564,7 @@ with left:
 
             st.dataframe(
                 df,
-                width="stretch"
+                use_container_width=True
             )
 
             st.download_button(
@@ -592,7 +593,7 @@ with right:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
         with st.expander("View Payment Method Data"):
@@ -601,7 +602,7 @@ with right:
 
             st.dataframe(
                 df,
-                width="stretch"
+                use_container_width=True
             )
 
             st.download_button(

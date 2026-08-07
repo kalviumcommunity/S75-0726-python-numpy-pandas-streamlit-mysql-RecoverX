@@ -17,6 +17,7 @@ from src.payment_queries import (
     get_high_value_failed_transactions,
     get_prioritized_transactions_to_retry,
     get_recovery_score_distribution,
+    get_recovery_score_buckets,
     get_revenue_impact_by_gateway,
     get_revenue_impact_over_time,
     get_revenue_recovery_summary,
@@ -187,9 +188,9 @@ if over_time.empty:
     st.info("No time-series data for the selected date range.")
 else:
     fig_time = revenue_impact_over_time_chart(over_time.to_dict("records"))
-    st.plotly_chart(fig_time, width="stretch")
+    st.plotly_chart(fig_time, use_container_width=True)
     with st.expander("Show Data Table"):
-        st.dataframe(over_time, hide_index=True, width="stretch")
+        st.dataframe(over_time, hide_index=True, use_container_width=True)
 
 st.divider()
 
@@ -235,11 +236,17 @@ else:
             f"across {int(stats['count']):,} failed attempts. A higher score means a transaction is more likely to succeed on retry."
         )
 
-    fig_score = recovery_score_distribution_chart(score_dist.to_dict("records"))
-    st.plotly_chart(fig_score, width="stretch")
+    fig_score = recovery_score_distribution_chart(
+        get_recovery_score_buckets(start_date=start_date_value, end_date=end_date_value)
+    )
+    st.plotly_chart(fig_score, use_container_width=True)
 
     with st.expander("Show Distribution Bin Data"):
-        st.dataframe(score_dist, hide_index=True, width="stretch")
+        buckets_df = pd.DataFrame(
+            get_recovery_score_buckets(start_date=start_date_value, end_date=end_date_value),
+            columns=["score_range", "count"],
+        )
+        st.dataframe(buckets_df, hide_index=True, use_container_width=True)
 
 st.divider()
 
@@ -263,9 +270,9 @@ if by_gateway.empty:
     st.info("No gateway-level data for the selected range.")
 else:
     fig_gateway = revenue_impact_by_gateway_chart(by_gateway.to_dict("records"))
-    st.plotly_chart(fig_gateway, width="stretch")
+    st.plotly_chart(fig_gateway, use_container_width=True)
     with st.expander("Show Gateway Data Table"):
-        st.dataframe(by_gateway, hide_index=True, width="stretch")
+        st.dataframe(by_gateway, hide_index=True, use_container_width=True)
 
 st.divider()
 
@@ -334,7 +341,6 @@ else:
     st.dataframe(
         hv_display,
         hide_index=True,
-        width="stretch",
         use_container_width=True,
     )
 
@@ -389,7 +395,7 @@ with st.expander("Show / hide prioritized retry list"):
     if prioritized.empty:
         st.info("No transactions currently meet the retry prioritization criteria.")
     else:
-        st.dataframe(prioritized, hide_index=True, width="stretch")
+        st.dataframe(prioritized, hide_index=True, use_container_width=True)
 
 st.divider()
 

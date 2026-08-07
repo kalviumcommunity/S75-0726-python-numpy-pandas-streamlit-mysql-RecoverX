@@ -714,7 +714,7 @@ def get_recovery_score_distribution(
 ):
     query = """
     SELECT
-        COALESCE(fc.recovery_score, brc.recovery_potential) AS score
+        COALESCE(fc.recovery_score, brc.recovery_potential) AS recovery_score
     FROM transactions t
     LEFT JOIN (
         SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
@@ -747,42 +747,62 @@ def get_recovery_score_distribution(
         params.append(end_date)
 
     rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
-    scores = pd.to_numeric(pd.Series([r.get("score") for r in rows]), errors="coerce").dropna()
-    scores = scores.clip(lower=0, upper=1)
 
-    if scores.empty:
-        return {
-            "distribution": [],
-            "stats": {},
-            "percentiles": {},
-            "total_scores": 0,
-        }
+    if not rows:
+        return pd.DataFrame(columns=["recovery_score", "score_range", "count"])
+
+    df = pd.DataFrame(rows)
+    df["recovery_score"] = pd.to_numeric(df["recovery_score"], errors="coerce")
+    df = df.dropna(subset=["recovery_score"])
+    df["recovery_score"] = df["recovery_score"].clip(lower=0, upper=1)
+
+    if df.empty:
+        return df.reset_index(drop=True)
 
     bins = [0, 0.2, 0.4, 0.6, 0.8, 1.0000001]
     labels = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"]
-    bucketed = pd.cut(scores, bins=bins, labels=labels, include_lowest=True, right=False)
+    bucketed = pd.cut(
+        df["recovery_score"],
+        bins=bins,
+        labels=labels,
+        include_lowest=True,
+        right=False,
+    )
     counts = bucketed.value_counts().reindex(labels, fill_value=0)
-
-    distribution = [
+    distribution_rows = [
         {"score_range": label, "count": int(counts[label])}
         for label in labels
     ]
+    dist_df = pd.DataFrame(distribution_rows)
+    df["score_range"] = pd.Categorical(bucketed, categories=labels, ordered=True)
+    df["count"] = df["score_range"].map(lambda s: counts[s] if pd.notna(s) else 0).astype(int)
+    return df.reset_index(drop=True)
 
-    percentiles = scores.quantile([0.25, 0.75, 0.9]).to_dict()
 
-    return {
-        "distribution": distribution,
-        "stats": {
-            "mean": float(scores.mean()),
-            "median": float(scores.median()),
-        },
-        "percentiles": {
-            "p25": float(percentiles.get(0.25, 0)),
-            "p75": float(percentiles.get(0.75, 0)),
-            "p90": float(percentiles.get(0.9, 0)),
-        },
-        "total_scores": int(scores.shape[0]),
-    }
+def get_recovery_score_buckets(
+    start_date: str = None,
+    end_date: str = None,
+):
+    df = get_recovery_score_distribution(start_date=start_date, end_date=end_date)
+    if df.empty or "score_range" not in df.columns:
+        return []
+    seen = set()
+    buckets = []
+    for _, row in df[["score_range", "count"]].drop_duplicates(subset=["score_range"]).iterrows():
+        key = str(row.get("score_range"))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        buckets.append(
+            {"score_range": key, "count": int(row.get("count", 0))}
+        )
+    label_order = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"]
+    return sorted(
+        buckets,
+        key=lambda b: (
+            label_order.index(b["score_range"]) if b["score_range"] in label_order else 99
+        ),
+    )
 
 
 def get_revenue_impact_by_gateway(
