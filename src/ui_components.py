@@ -1,7 +1,6 @@
 
 import streamlit as st
 
- frontend_changes
 THEMES = {
     "Dark": {
         "sidebar_bg": "#0f172a",
@@ -9,7 +8,6 @@ THEMES = {
         "sidebar_subtle": "#94a3b8",
         "sidebar_border": "#334155",
         "accent": "#2563eb",
-        "body_label": "Dark",
     },
     "Light": {
         "sidebar_bg": "#f8fafc",
@@ -17,7 +15,6 @@ THEMES = {
         "sidebar_subtle": "#475569",
         "sidebar_border": "#e2e8f0",
         "accent": "#2563eb",
-        "body_label": "Light",
     },
     "Blue": {
         "sidebar_bg": "linear-gradient(180deg, #1e3a8a 0%, #1d4ed8 60%, #2563eb 100%)",
@@ -25,7 +22,6 @@ THEMES = {
         "sidebar_subtle": "#bfdbfe",
         "sidebar_border": "#3b82f6",
         "accent": "#93c5fd",
-        "body_label": "Blue",
     },
 }
 
@@ -42,59 +38,6 @@ def _get_active_theme():
     return theme_name, THEMES[theme_name]
 
 
-
-def _apply_theme(theme: str):
-    theme = (theme or "Dark").strip().lower()
-    if theme == "light":
-        bg = "#ffffff"
-        text = "#0f172a"
-        sidebar_bg = "#f1f5f9"
-        sidebar_text = "#0f172a"
-        sidebar_border = "#e2e8f0"
-        caption = "#475569"
-    else:
-        bg = "#0b1220"
-        text = "#e5e7eb"
-        sidebar_bg = "#0f172a"
-        sidebar_text = "#ffffff"
-        sidebar_border = "#334155"
-        caption = "#94a3b8"
-
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-color: {bg} !important;
-            color: {text} !important;
-        }}
-        .stApp [data-testid="stMarkdownContainer"] {{
-            color: {text} !important;
-        }}
-        [data-testid="stSidebar"] {{
-            background-color: {sidebar_bg} !important;
-            color: {sidebar_text} !important;
-        }}
-        [data-testid="stSidebar"] * {{
-            color: {sidebar_text} !important;
-        }}
-        [data-testid="stSidebarNav"] span {{
-            color: {sidebar_text} !important;
-        }}
-        [data-testid="stSidebarNavLink"] {{
-            color: {sidebar_text} !important;
-        }}
-        [data-testid="stSidebar"] hr, [data-testid="stSidebar"] .stDivider {{
-            border-color: {sidebar_border} !important;
-        }}
-        [data-testid="stSidebar"] p {{
-            color: {caption} !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-main
-
 def setup_page(page_title="RecoverX", page_icon="💰"):
     st.set_page_config(
         page_title=f"RecoverX - {page_title}",
@@ -102,12 +45,9 @@ def setup_page(page_title="RecoverX", page_icon="💰"):
         layout="wide",
         initial_sidebar_state="expanded",
     )
- frontend_changes
-    theme_name, theme = _get_active_theme()
-    if theme_name == "Dark":
-        body_bg_css = ""
-        body_fg_css = ""
-    elif theme_name == "Light":
+    _, theme = _get_active_theme()
+
+    if theme is THEMES.get("Light"):
         body_bg_css = """
         [data-testid="stAppViewContainer"], .main, .block-container {
             background-color: #ffffff !important;
@@ -117,8 +57,7 @@ def setup_page(page_title="RecoverX", page_icon="💰"):
             color: #0f172a !important;
         }
         """
-        body_fg_css = ""
-    else:
+    elif theme is THEMES.get("Blue"):
         body_bg_css = """
         [data-testid="stAppViewContainer"], .main, .block-container {
             background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%) !important;
@@ -130,12 +69,12 @@ def setup_page(page_title="RecoverX", page_icon="💰"):
             color: #1e3a8a !important;
         }
         """
-        body_fg_css = ""
+    else:
+        body_bg_css = ""
 
     st.markdown(
         f"""
         <style>
-        /* Sidebar background + foreground */
         [data-testid="stSidebar"] {{
             background: {theme['sidebar_bg']} !important;
             color: {theme['sidebar_fg']} !important;
@@ -161,46 +100,25 @@ def setup_page(page_title="RecoverX", page_icon="💰"):
         [data-testid="stSidebar"] hr {{
             border-color: {theme['sidebar_border']} !important;
         }}
-        /* Global accent on primary buttons */
         button[kind="primary"] {{
             background-color: {theme['accent']} !important;
             border-color: {theme['accent']} !important;
         }}
         {body_bg_css}
-        {body_fg_css}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    if "ui_theme" not in st.session_state:
-        st.session_state["ui_theme"] = "Dark"
-    _apply_theme(st.session_state["ui_theme"])
- main
-
 
 def render_sidebar():
     theme_name, theme = _get_active_theme()
     with st.sidebar:
-        selected_theme = st.selectbox(
-            "Theme",
-            options=["Dark", "Light"],
-            index=0 if st.session_state.get("ui_theme", "Dark") == "Dark" else 1,
-        )
-        st.session_state["ui_theme"] = selected_theme
-        _apply_theme(selected_theme)
         st.markdown(
- frontend_changes
             f"""
             <div style="padding: 1rem 0; border-bottom: 1px solid {theme['sidebar_border']}; margin-bottom: 1rem;">
                 <h2 style="color: {theme['sidebar_fg']}; margin:0; font-size: 1.25rem;">💰 RecoverX</h2>
                 <p style="color: {theme['sidebar_subtle']}; margin: 0.25rem 0 0 0; font-size: 0.875rem;">Payment Analytics</p>
-
-            """
-            <div style="padding: 1rem 0; border-bottom: 1px solid rgba(148,163,184,0.35); margin-bottom: 1rem;">
-                <h2 style="margin:0; font-size: 1.25rem;">💰 RecoverX</h2>
-                <p style="margin: 0.25rem 0 0 0; font-size: 0.875rem;">Payment Analytics</p>
- main
             </div>
             """,
             unsafe_allow_html=True,

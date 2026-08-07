@@ -8,7 +8,7 @@ headers = {
 BASE_URL = "http://127.0.0.1:8000"
 
 
-def test_endpoint(method, endpoint, json_data=None):
+def run_endpoint_perf_test(method, endpoint, json_data=None):
     url = BASE_URL + endpoint
 
     start = time.perf_counter()
@@ -52,16 +52,16 @@ if __name__ == "__main__":
 
     print("\nRecoverX API Performance Test\n")
 
-    test_endpoint(
+    run_endpoint_perf_test(
         "GET",
         "/api/transactions"
     )
 
-    test_endpoint(
+    run_endpoint_perf_test(
     "GET",
     "/api/transactions/TXN-BZK1NZTVWVJI"
 )
-    test_endpoint(
+    run_endpoint_perf_test(
     "GET",
     "/api/transactions/TXN-BZK1NZTVWVJI/retries"
 )

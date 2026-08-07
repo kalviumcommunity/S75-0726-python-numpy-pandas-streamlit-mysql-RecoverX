@@ -4,6 +4,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 from src.ui_components import (
     setup_page,
@@ -206,7 +207,7 @@ with left:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
     else:
@@ -222,7 +223,7 @@ with right:
         st.dataframe(
             df,
             hide_index=True,
-            width="stretch"
+            use_container_width=True
         )
 
         st.download_button(
@@ -293,13 +294,13 @@ fig = retry_timing_analysis_chart(distribution)
 
 st.plotly_chart(
     fig,
-    width="stretch"
+    use_container_width=True
 )
 
 if distribution:
     with st.expander("View Timing Data"):
         df_timing = pd.DataFrame(distribution)
-        st.dataframe(df_timing, hide_index=True, width="stretch")
+        st.dataframe(df_timing, hide_index=True, use_container_width=True)
         st.download_button(
             "Download Timing CSV",
             df_timing.to_csv(index=False),
@@ -319,7 +320,7 @@ heatmap_data = get_retry_success_by_time_heatmap()
 
 if heatmap_data and heatmap_data.get("values"):
     fig = retry_success_heatmap_chart(heatmap_data)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("View Heatmap Data"):
         days = heatmap_data.get("days", [])
@@ -335,7 +336,7 @@ if heatmap_data and heatmap_data.get("values"):
                     "Success Rate (%)": rate,
                 })
         df_heatmap = pd.DataFrame(heatmap_rows)
-        st.dataframe(df_heatmap, hide_index=True, width="stretch", height=300)
+        st.dataframe(df_heatmap, hide_index=True, use_container_width=True, height=300)
         st.download_button(
             "Download Heatmap CSV",
             df_heatmap.to_csv(index=False),
@@ -358,7 +359,7 @@ if not df_prioritized.empty:
     st.dataframe(
         df_prioritized,
         hide_index=True,
-        width="stretch",
+        use_container_width=True,
         height=350,
     )
     st.download_button(
@@ -417,9 +418,9 @@ else:
             margin={"l": 0, "r": 0, "t": 30, "b": 0},
             showlegend=False,
         )
-        st.plotly_chart(fig_retry_dist, width="stretch")
+        st.plotly_chart(fig_retry_dist, use_container_width=True)
         with st.expander("Show Retry Distribution Data"):
-            st.dataframe(retry_counts, hide_index=True, width="stretch")
+            st.dataframe(retry_counts, hide_index=True, use_container_width=True)
     except Exception as err:
         st.warning(f"Could not render retry distribution chart: {err}")
 
@@ -464,7 +465,6 @@ else:
     st.dataframe(
         display_ineffective,
         hide_index=True,
-        width="stretch",
         use_container_width=True,
     )
 
@@ -506,7 +506,7 @@ if gateway_data:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
     with right:
@@ -516,7 +516,7 @@ if gateway_data:
         st.dataframe(
             df,
             hide_index=True,
-            width="stretch"
+            use_container_width=True
         )
 
         st.download_button(
@@ -552,7 +552,7 @@ if bank_data:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
     with right:
@@ -562,7 +562,7 @@ if bank_data:
         st.dataframe(
             df,
             hide_index=True,
-            width="stretch"
+            use_container_width=True
         )
 
         st.download_button(

@@ -10,7 +10,7 @@ HEADERS = {
 }
 
 
-def test_endpoint(method, endpoint, data=None, files=None, description=""):
+def run_endpoint_test(method, endpoint, data=None, files=None, description=""):
     url = BASE_URL + endpoint
     print("\n" + "=" * 80)
     print(f"TEST: {description}")
@@ -55,13 +55,13 @@ def main():
     results = []
     
     # 1. Health Check
-    results.append(("Health Check", test_endpoint("GET", "/", description="Health Check")))
+    results.append(("Health Check", run_endpoint_test("GET", "/", description="Health Check")))
     
     # 2. Analytics: Overview
-    results.append(("Analytics Overview", test_endpoint("GET", "/api/analytics/overview", description="Analytics Overview")))
+    results.append(("Analytics Overview", run_endpoint_test("GET", "/api/analytics/overview", description="Analytics Overview")))
     
     # 3. Transactions: List
-    results.append(("List Transactions", test_endpoint("GET", "/api/transactions?page=1&limit=10", description="List Transactions")))
+    results.append(("List Transactions", run_endpoint_test("GET", "/api/transactions?page=1&limit=10", description="List Transactions")))
     
     # 4. Transactions: Create
     txn_data = {
@@ -75,10 +75,10 @@ def main():
         "final_status": "Success",
         "created_at": "2024-07-23T10:00:00Z"
     }
-    results.append(("Create Transaction", test_endpoint("POST", "/api/transactions", data=txn_data, description="Create Transaction")))
+    results.append(("Create Transaction", run_endpoint_test("POST", "/api/transactions", data=txn_data, description="Create Transaction")))
     
     # 5. Transactions: Get One
-    results.append(("Get Transaction", test_endpoint("GET", "/api/transactions/TEST-TXN-001", description="Get Single Transaction")))
+    results.append(("Get Transaction", run_endpoint_test("GET", "/api/transactions/TEST-TXN-001", description="Get Single Transaction")))
     
     # 6. Payment Retries: Create
     retry_data = {
@@ -89,22 +89,22 @@ def main():
         "response_code": "51",
         "response_message": "Insufficient Funds"
     }
-    results.append(("Create Retry", test_endpoint("POST", "/api/transactions/TEST-TXN-001/retries", data=retry_data, description="Create Retry")))
+    results.append(("Create Retry", run_endpoint_test("POST", "/api/transactions/TEST-TXN-001/retries", data=retry_data, description="Create Retry")))
     
     # 7. Payment Retries: List
-    results.append(("List Retries", test_endpoint("GET", "/api/transactions/TEST-TXN-001/retries?page=1&limit=10", description="List Retries")))
+    results.append(("List Retries", run_endpoint_test("GET", "/api/transactions/TEST-TXN-001/retries?page=1&limit=10", description="List Retries")))
     
     # 8. Payment Lifecycle
-    results.append(("Payment Lifecycle", test_endpoint("GET", "/api/payment-lifecycle?page=1&limit=10", description="Payment Lifecycle")))
+    results.append(("Payment Lifecycle", run_endpoint_test("GET", "/api/payment-lifecycle?page=1&limit=10", description="Payment Lifecycle")))
     
     # 9. Bank Response Codes: List
-    results.append(("List Bank Codes", test_endpoint("GET", "/api/bank-response-codes?page=1&limit=10", description="List Bank Response Codes")))
+    results.append(("List Bank Codes", run_endpoint_test("GET", "/api/bank-response-codes?page=1&limit=10", description="List Bank Response Codes")))
     
     # 10. Bank Response Codes: Temporary
-    results.append(("Temporary Failures", test_endpoint("GET", "/api/bank-response-codes/temporary?page=1&limit=10", description="Temporary Failures")))
+    results.append(("Temporary Failures", run_endpoint_test("GET", "/api/bank-response-codes/temporary?page=1&limit=10", description="Temporary Failures")))
     
     # 11. Bank Response Codes: Permanent
-    results.append(("Permanent Failures", test_endpoint("GET", "/api/bank-response-codes/permanent?page=1&limit=10", description="Permanent Failures")))
+    results.append(("Permanent Failures", run_endpoint_test("GET", "/api/bank-response-codes/permanent?page=1&limit=10", description="Permanent Failures")))
     
     # 12. Bank Response Codes: Create
     brc_data = {
@@ -115,13 +115,13 @@ def main():
         "recovery_potential": 0.80,
         "recommended_action": "Retry after 24 hours"
     }
-    results.append(("Create Bank Code", test_endpoint("POST", "/api/bank-response-codes", data=brc_data, description="Create Bank Response Code")))
+    results.append(("Create Bank Code", run_endpoint_test("POST", "/api/bank-response-codes", data=brc_data, description="Create Bank Response Code")))
     
     # 13. Analytics: Failure Classifications
-    results.append(("Failure Classifications", test_endpoint("GET", "/api/analytics/failure-classifications?page=1&limit=10", description="Failure Classifications")))
+    results.append(("Failure Classifications", run_endpoint_test("GET", "/api/analytics/failure-classifications?page=1&limit=10", description="Failure Classifications")))
     
     # 14. Analytics: Response Code Analysis
-    results.append(("Response Code Analysis", test_endpoint("GET", "/api/analytics/response-code-analysis?page=1&limit=10", description="Response Code Analysis")))
+    results.append(("Response Code Analysis", run_endpoint_test("GET", "/api/analytics/response-code-analysis?page=1&limit=10", description="Response Code Analysis")))
     
     # Summary
     print("\n" + "=" * 80)

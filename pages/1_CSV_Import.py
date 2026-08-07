@@ -1,3 +1,4 @@
+
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -18,6 +19,7 @@ from src.data_cleaning import (
 
 load_dotenv()
 
+
 def connect_to_db():
     try:
         connection = mysql.connector.connect(
@@ -32,13 +34,13 @@ def connect_to_db():
         st.error(f"Error connecting to MySQL: {e}")
         return None
 
+
 def import_transactions(df):
     connection = connect_to_db()
     if not connection:
-        return False
+        return False, 0
 
     try:
-        # Clean the data
         cleaned_df = clean_transactions(df)
         cursor = connection.cursor()
         for _, row in cleaned_df.iterrows():
@@ -62,13 +64,13 @@ def import_transactions(df):
         if connection and connection.is_connected():
             connection.close()
 
+
 def import_payment_retries(df):
     connection = connect_to_db()
     if not connection:
         return False, 0
 
     try:
-        # Clean the data
         cleaned_df = clean_payment_retries(df)
         cursor = connection.cursor()
         for _, row in cleaned_df.iterrows():
@@ -89,13 +91,13 @@ def import_payment_retries(df):
         if connection and connection.is_connected():
             connection.close()
 
+
 def import_bank_response_codes(df):
     connection = connect_to_db()
     if not connection:
         return False, 0
 
     try:
-        # Clean the data
         cleaned_df = clean_bank_response_codes(df)
         cursor = connection.cursor()
         for _, row in cleaned_df.iterrows():
@@ -117,13 +119,10 @@ def import_bank_response_codes(df):
         if connection and connection.is_connected():
             connection.close()
 
+
 setup_page("CSV Import", "📥")
 render_header()
 date_range = render_sidebar()
-
-# ---------------------------------------------------------
-# Header
-# ---------------------------------------------------------
 
 st.subheader("CSV Import Center")
 
@@ -141,14 +140,11 @@ Supported tables:
 """
 )
 
-refresh = st.button("🔄 Refresh")
-
-if refresh:
+if st.button("🔄 Refresh Page"):
     st.rerun()
 
 st.divider()
 
- frontend_changes
 required_cols = {
     "transactions": ["transaction_id", "customer_id", "amount", "initial_status", "created_at"],
     "payment_retries": ["transaction_id", "attempt_number", "retry_timestamp", "retry_status"],
@@ -284,7 +280,14 @@ if uploaded_file is not None:
             vcol4.metric("Rows After Clean", "0")
             st.error("Cleaning produced 0 valid rows — cannot import. Check the CSV format and required columns.")
 
-if st.button("📥 Import Data", type="primary", disabled=not validation_state.get("cleaned_df", pd.DataFrame()).shape[0] if validation_state else True):
+import_disabled = True
+if validation_state:
+    _cdf = validation_state.get("cleaned_df", pd.DataFrame())
+    _tbl = validation_state.get("table")
+    if isinstance(_cdf, pd.DataFrame) and not _cdf.empty and _tbl == table:
+        import_disabled = False
+
+if st.button("📥 Import Data", type="primary", disabled=import_disabled):
     cleaned_to_import = validation_state.get("cleaned_df")
     table_to_import = validation_state.get("table")
     if cleaned_to_import is None or cleaned_to_import.empty or table_to_import != table:
@@ -367,181 +370,6 @@ if st.button("📥 Import Data", type="primary", disabled=not validation_state.g
             st.success(f"✅ Successfully imported {count} valid record(s) into `{table}`!")
             st.balloons()
 
-# ---------------------------------------------------------
-# Import Configuration
-# ---------------------------------------------------------
-
-left, right = st.columns([1, 2])
-
-with left:
-
-    table = st.selectbox(
-        "Destination Table",
-        [
-            "transactions",
-            "payment_retries",
-            "bank_response_codes",
-        ],
-    )
-
-with right:
-
-    uploaded_file = st.file_uploader(
-        "📂 Drag & Drop your CSV here",
-        type=["csv"],
-        help="Only CSV files are supported.",
-    )
-
-# ---------------------------------------------------------
-# File Details
-# ---------------------------------------------------------
-
-if uploaded_file is not None:
-
-    file_size = uploaded_file.size / 1024
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "Filename",
-        uploaded_file.name,
-    )
-
-    c2.metric(
-        "Size",
-        f"{file_size:.1f} KB",
-    )
-
-    c3.metric(
-        "Destination",
-        table,
-    )
-
-    st.divider()
-
-# ---------------------------------------------------------
-# CSV Preview
-# ---------------------------------------------------------
-
-if uploaded_file is not None:
-
-    df = pd.read_csv(uploaded_file)
-
-    st.subheader("CSV Preview")
-
-    st.dataframe(
-        df.head(10),
-        hide_index=True,
-        width="stretch",
-    )
-
-# ---------------------------------------------------------
-# CSV Validation
-# ---------------------------------------------------------
-
-    validation = validate_import_dataframe(df, table)
-
-    st.divider()
-
-    st.subheader("Validation Report")
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Rows Uploaded",
-        len(df)
-    )
-
-    col2.metric(
-        "Valid Rows",
-        validation["cleaned_rows"]
-    )
-
-    col3.metric(
-        "Dropped Rows",
-        validation["invalid_rows"]
-    )
-
-    st.divider()
-
-    # ---------------------------------------------------------
-    # Required Columns
-    # ---------------------------------------------------------
-
-    if validation["missing_columns"]:
-
-        st.error(
-            "Missing Required Columns:\n\n"
-            + ", ".join(validation["missing_columns"])
-        )
-
-    else:
-
-        st.success("✅ All required columns are present.")
-
-    # ---------------------------------------------------------
-    # Cleaned Data Preview
-    # ---------------------------------------------------------
-
-    if validation["valid"]:
-
-        st.subheader("Cleaned Data Preview")
-
-        st.dataframe(
-            validation["cleaned_df"].head(10),
-            hide_index=True,
-            width="stretch",
-        )
-
-    if validation["invalid_rows"]:
-
-        st.warning(
-            f"{validation['invalid_rows']} invalid rows were removed during cleaning."
-        )
-
-    st.divider()
-
-    if st.button("🚀 Import Data"):
-
-        if not validation["valid"]:
-
-            st.error("Import blocked. Please fix the CSV first.")
-
-        else:
-
-            with st.spinner("Importing data into database..."):
-
-                if table == "transactions":
-
-                    success, count = import_transactions(
-                        validation["cleaned_df"]
-                    )
-
-                elif table == "payment_retries":
-
-                    success, count = import_payment_retries(
-                        validation["cleaned_df"]
-                    )
-
-                else:
-
-                    success, count = import_bank_response_codes(
-                        validation["cleaned_df"]
-                    )
-
-            if success:
-
-                st.success(
-                    f"🎉 Successfully imported {count} records!"
-                )
-
-                st.balloons()
-
-            else:
-
-                st.error("Import failed.")
- main
-
 st.divider()
 
 st.subheader("📄 CSV Templates")
@@ -557,73 +385,72 @@ Download one of the templates below before importing your data.
 col1, col2, col3 = st.columns(3)
 
 with col1:
-
     st.markdown("### 💳 Transactions")
-
-    st.caption(
-        "Contains payment transaction records."
-    )
-
-    with open("example_transactions.csv", "rb") as f:
-
-        st.download_button(
+    st.caption("Contains payment transaction records.")
+    example_path = "example_transactions.csv"
+    if Path(example_path).exists():
+        with open(example_path, "rb") as f:
+            st.download_button(
+                "⬇ Download",
+                f,
+                file_name="example_transactions.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_txn_template",
+            )
+    else:
+        st.button(
             "⬇ Download",
-            f,
-            file_name="example_transactions.csv",
-            mime="text/csv",
+            disabled=True,
+            help=f"Template file '{example_path}' not found in project root.",
             use_container_width=True,
+            key="dl_txn_template_missing",
         )
 
 with col2:
-
     st.markdown("### 🔁 Payment Retries")
-
-    st.caption(
-        "Contains retry attempt history."
-    )
-
-    with open("example_payment_retries.csv", "rb") as f:
-
-        st.download_button(
+    st.caption("Contains retry attempt history.")
+    example_path = "example_payment_retries.csv"
+    if Path(example_path).exists():
+        with open(example_path, "rb") as f:
+            st.download_button(
+                "⬇ Download",
+                f,
+                file_name="example_payment_retries.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_pr_template",
+            )
+    else:
+        st.button(
             "⬇ Download",
-            f,
-            file_name="example_payment_retries.csv",
-            mime="text/csv",
+            disabled=True,
+            help=f"Template file '{example_path}' not found in project root.",
             use_container_width=True,
+            key="dl_pr_template_missing",
         )
 
 with col3:
-
     st.markdown("### 🏦 Bank Codes")
-
-    st.caption(
-        "Contains response codes from banks."
-    )
-
-    with open("example_bank_response_codes.csv", "rb") as f:
-
-        st.download_button(
+    st.caption("Contains response codes from banks.")
+    example_path = "example_bank_response_codes.csv"
+    if Path(example_path).exists():
+        with open(example_path, "rb") as f:
+            st.download_button(
+                "⬇ Download",
+                f,
+                file_name="example_bank_response_codes.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_brc_template",
+            )
+    else:
+        st.button(
             "⬇ Download",
-            f,
-            file_name="example_bank_response_codes.csv",
-            mime="text/csv",
+            disabled=True,
+            help=f"Template file '{example_path}' not found in project root.",
             use_container_width=True,
+            key="dl_brc_template_missing",
         )
-
-render_footer()
-
-st.divider()
-
-st.success("✅ RecoverX CSV Import Center Ready")
-
-st.caption(
-    "RecoverX • Day 8 • CSV Import Module"
-)
-
-st.success("✅ RecoverX CSV Import Center Ready")
-
-st.caption(
-    "RecoverX • Day 8 • CSV Import Module"
-)
 
 render_footer()

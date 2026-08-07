@@ -1,3 +1,4 @@
+
 import sys
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -5,7 +6,6 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 import pandas as pd
-frontend_changes
 import streamlit as st
 
 from src.charts import (
@@ -65,80 +65,6 @@ def _highlight_status(val):
     return "color: #ca8a04; font-weight: bold"
 
 
-import plotly.express as px
-import io
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
- 
-from src.payment_queries import get_dashboard_key_metrics
- main
-
-from src.payment_queries import (
-    get_total_transactions,
-    get_successful_transactions,
-    get_failed_transactions,
-    get_alerts,
-    get_failure_causes_distribution,
-)
-
-
-def render_recent_alerts(limit: int = 5):
-    """Render the most recent alerts in a compact table."""
-    st.subheader("Recent Alerts")
-    alerts = get_alerts(limit=limit) or []
-
-    if not alerts:
-        st.info("No alerts yet.")
-        return
-
-    alert_rows = []
-    for alert in alerts:
-        created_at = alert.get("created_at")
-        if hasattr(created_at, "strftime"):
-            timestamp = created_at.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            timestamp = str(created_at or "N/A")
-
-        alert_rows.append(
-            {
-                "Alert Type": alert.get("alert_type") or "Unknown",
-                "Status": "Resolved" if alert.get("is_resolved") else "Unresolved",
-                "Timestamp": timestamp,
-            }
-        )
-
-    df_alerts = pd.DataFrame(alert_rows)
-    st.dataframe(df_alerts, use_container_width=True, hide_index=True)
-
-
-def render_top_failures(limit: int = 5):
-    """Render the most common failure reasons using the shared failure-cause query."""
-    st.subheader("Top Failures")
-    failure_causes = get_failure_causes_distribution() or []
-
-    if not failure_causes:
-        st.info("No failures recorded.")
-        return
-
-    failure_counts = pd.DataFrame(failure_causes)
-    if "cause" in failure_counts.columns and "count" in failure_counts.columns:
-        failure_counts = failure_counts.rename(columns={"cause": "Failure Reason", "count": "Count"})
-    else:
-        failure_counts = failure_counts.rename(columns={col: col for col in failure_counts.columns})
-
-    failure_counts = (
-        failure_counts.sort_values(by=["Count", "Failure Reason"], ascending=[False, True])
-        .head(limit)
-        .reset_index(drop=True)
-    )
-
-    if failure_counts.empty:
-        st.info("No failures recorded.")
-        return
-
-    st.dataframe(failure_counts, use_container_width=True, hide_index=True)
-
-
-
 setup_page("Dashboard", "📊")
 render_header()
 date_range = render_sidebar()
@@ -196,11 +122,10 @@ with chart_col1:
         st.error(f"Unable to load transactions over time: {error}")
         status_over_time = []
     fig_overview = transaction_status_over_time_chart(status_over_time)
-    st.plotly_chart(fig_overview, width="stretch")
+    st.plotly_chart(fig_overview, use_container_width=True)
 
 with chart_col2:
     st.subheader("Payment Methods")
- frontend_changes
     try:
         payment_method_data = cached_get_payment_method_amounts(
             start_date=start_date_value,
@@ -215,31 +140,12 @@ with chart_col2:
     else:
         payment_method_records = payment_method_data.to_dict("records")
     fig_pm = payment_method_amounts_chart(payment_method_records)
-    st.plotly_chart(fig_pm, width="stretch")
+    st.plotly_chart(fig_pm, use_container_width=True)
 
-
-    payment_methods = ["Credit Card", "Debit Card", "Net Banking", "UPI"]
-    amounts = [45000, 30000, 25000, 15000]
-    df_bar = pd.DataFrame({"Payment Method": payment_methods, "Amount ($)": amounts})
-    fig = px.bar(df_bar, x="Payment Method", y="Amount ($)", color="Payment Method", 
-                 color_discrete_sequence=["#2563eb", "#38bdf8", "#0ea5e9", "#0369a1"])
-    fig.update_layout(height=300, margin={"l": 0, "r": 0, "t": 30, "b": 0}, showlegend=False)
-    st.plotly_chart(fig, width='stretch')
-
-# --- Alerts & Failures Snapshot ---
-st.markdown("---")
-alert_col, failure_col = st.columns(2)
-with alert_col:
-    render_recent_alerts(limit=5)
-with failure_col:
-    render_top_failures(limit=5)
-
-# --- Recent Transactions Table ---
- main
 st.markdown("---")
 
 # =========================================================
-# Recent Alerts (Day 8 Yogesh)
+# Recent Alerts (Day 8 Yogesh) + Top Failures
 # =========================================================
 
 st.subheader("Recent Alerts")
@@ -263,11 +169,7 @@ with alert_col1:
         ]
         recent_display = recent_alerts_df[cols_keep].copy()
         recent_display.columns = [c.replace("_", " ").title() for c in cols_keep]
-        st.dataframe(recent_display, hide_index=True, width="stretch")
-
-# =========================================================
-# Top Failures (Day 8 Yogesh)
-# =========================================================
+        st.dataframe(recent_display, hide_index=True, use_container_width=True)
 
 with alert_col2:
     st.markdown("**Top 3 Response Code Failures**")
@@ -284,7 +186,7 @@ with alert_col2:
         cols_show = [c for c in ["response_code", "description", "total", "recovery_potential"] if c in fb_df.columns]
         fb_display = fb_df[cols_show].copy()
         fb_display.columns = [c.replace("_", " ").title() for c in cols_show]
-        st.dataframe(fb_display, hide_index=True, width="stretch")
+        st.dataframe(fb_display, hide_index=True, use_container_width=True)
 
 st.markdown("---")
 
@@ -326,10 +228,10 @@ else:
         st.dataframe(
             df_recent.style.map(_highlight_status, subset=[status_col]),
             hide_index=True,
-            width="stretch",
+            use_container_width=True,
         )
     else:
-        st.dataframe(df_recent, hide_index=True, width="stretch")
+        st.dataframe(df_recent, hide_index=True, use_container_width=True)
 
 st.markdown("---")
 

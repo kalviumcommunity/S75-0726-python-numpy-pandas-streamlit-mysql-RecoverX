@@ -117,14 +117,59 @@ def bin_data(arr: np.ndarray, bins: int = 10) -> Tuple[np.ndarray, np.ndarray]:
 def calculate_correlation(x: np.ndarray, y: np.ndarray) -> float:
     """
     Calculate Pearson correlation coefficient between two arrays.
-    
+
     Args:
         x (np.ndarray): First numeric array
         y (np.ndarray): Second numeric array
-        
+
     Returns:
         float: Pearson correlation coefficient
     """
     x = x[~np.isnan(x)]
     y = y[~np.isnan(y)]
     return float(np.corrcoef(x, y)[0, 1])
+
+
+def compute_distribution_stats(arr: np.ndarray) -> dict:
+    """
+    Compute a combined distribution statistics summary used by dashboard pages.
+
+    Combines basic statistics with standard percentile buckets so callers
+    can render KPI cards directly from one dictionary.
+
+    Args:
+        arr (np.ndarray): Input numeric array (may include NaNs, which are dropped)
+
+    Returns:
+        dict: Keys: mean, median, std, min, max, count, p10, p25, p75, p90
+    """
+    if not isinstance(arr, np.ndarray):
+        arr = np.asarray(arr, dtype=float)
+    clean = arr[~np.isnan(arr)]
+    if len(clean) == 0:
+        return {
+            "mean": 0.0,
+            "median": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "count": 0,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0,
+        }
+    basic = calculate_basic_stats(clean)
+    perc = calculate_percentiles(clean, percentiles=[10, 25, 75, 90])
+    return {
+        "mean": basic["mean"],
+        "median": basic["median"],
+        "std": basic["std"],
+        "min": basic["min"],
+        "max": basic["max"],
+        "count": basic["count"],
+        "p10": perc.get("p10", 0.0),
+        "p25": perc.get("p25", 0.0),
+        "p75": perc.get("p75", 0.0),
+        "p90": perc.get("p90", 0.0),
+    }

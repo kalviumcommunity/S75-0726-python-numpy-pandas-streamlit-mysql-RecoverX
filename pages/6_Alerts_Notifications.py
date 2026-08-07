@@ -202,7 +202,7 @@ if not df_active.empty:
         .to_dict("records")
     )
     fig = alert_severity_chart(severity_counts)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No active alerts available yet — click 'Generate Alerts Now' to run rules.")
 
@@ -302,7 +302,7 @@ if alert_rules:
             for rule in alert_rules
         ]
     )
-    st.dataframe(summary_df, hide_index=True, width="stretch")
+    st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
     st.divider()
 
@@ -487,7 +487,7 @@ else:
 
     st.divider()
     st.subheader("Active Alerts Table")
-    st.dataframe(df_display, hide_index=True, width="stretch")
+    st.dataframe(df_display, hide_index=True, use_container_width=True)
 
     st.divider()
     csv = df_display.to_csv(index=False)
@@ -571,7 +571,7 @@ else:
         "Created At",
         "Resolved At",
     ]
-    st.dataframe(display_df, hide_index=True, width="stretch")
+    st.dataframe(display_df, hide_index=True, use_container_width=True)
 
     csv_hist = display_df.to_csv(index=False)
     st.download_button(
