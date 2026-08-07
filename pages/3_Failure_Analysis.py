@@ -11,6 +11,7 @@ from src.ui_components import (
     render_header,
     render_sidebar,
     render_footer,
+    require_page_permission,
 )
 
 from src.charts import (
@@ -31,6 +32,39 @@ from src.payment_queries import (
     get_failure_causes_distribution,
 )
 
+@st.cache_data(ttl=60)
+def _cached_get_filtered_failed_transactions(start_date=None, end_date=None,
+                                            failure_type=None, limit=100, offset=0):
+    return get_filtered_failed_transactions(start_date, end_date,
+                                           failure_type, limit, offset)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_type_distribution(start_date=None, end_date=None):
+    return get_failure_type_distribution(start_date, end_date)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_breakdown_by_response_code(start_date=None, end_date=None, failure_type=None, limit=50):
+    return get_failure_breakdown_by_response_code(start_date, end_date, failure_type, limit)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_breakdown_by_gateway(start_date=None, end_date=None, failure_type=None):
+    return get_failure_breakdown_by_gateway(start_date, end_date, failure_type)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_breakdown_by_payment_method(start_date=None, end_date=None, failure_type=None):
+    return get_failure_breakdown_by_payment_method(start_date, end_date, failure_type)
+
+@st.cache_data(ttl=60)
+def _cached_get_failure_causes_distribution(start_date=None, end_date=None):
+    return get_failure_causes_distribution(start_date, end_date)
+
+get_filtered_failed_transactions = _cached_get_filtered_failed_transactions
+get_failure_type_distribution = _cached_get_failure_type_distribution
+get_failure_breakdown_by_response_code = _cached_get_failure_breakdown_by_response_code
+get_failure_breakdown_by_gateway = _cached_get_failure_breakdown_by_gateway
+get_failure_breakdown_by_payment_method = _cached_get_failure_breakdown_by_payment_method
+get_failure_causes_distribution = _cached_get_failure_causes_distribution
+
 # ----------------------------------------------------
 # Page Setup
 # ----------------------------------------------------
@@ -38,6 +72,8 @@ from src.payment_queries import (
 setup_page("Failure Analysis", "❌")
 render_header()
 date_range = render_sidebar()
+
+require_page_permission("Failure Analysis")
 
 st.subheader("Analyze Payment Failure Patterns")
 

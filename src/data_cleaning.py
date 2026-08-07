@@ -137,3 +137,128 @@ def merge_payment_lifecycle(transactions_df: pd.DataFrame, retries_df: pd.DataFr
     merged = merged.sort_values(by=["transaction_id", "attempt_number"])
     
     return merged
+
+
+# -----------------------------
+# Duplicate detection (in-file + vs DB)
+# -----------------------------
+
+def _dedupe_in_file(df: pd.DataFrame, subset):
+    """Drop rows whose subset keys are duplicated within the file.
+    Returns (deduped_df, count_removed_in_file).
+    """
+    before = len(df)
+    deduped = df.drop_duplicates(subset=subset, keep="last")
+    return deduped, (before - len(deduped))
+
+
+def dedupe_and_count(
+    df: pd.DataFrame,
+    table: str,
+    pk_columns,
+    connection_factory=None,
+):
+    """
+    High-level dedupe helper for CSV/JSON imports.
+
+    Steps:
+      1) Drop duplicates WITHIN the incoming data (keep last) on pk_columns
+      2) Query MySQL `table` to find which of those pk_columns values already exist
+         in the DB; drop them (reject on PK)
+      3) Return a dict:
+            {
+              "df": filtered DataFrame,
+              "skipped_in_file": int,
+              "skipped_in_db": int,
+              "imported": int (rows to insert after all dedupes),
+            }
+    """
+    from src.db import get_db_connection, close_db_connection, execute_query
+
+    # Step 1 — in-file duplicates
+    deduped_file, skipped_in_file = _dedupe_in_file(df, pk_columns)
+    total_after_file = len(deduped_file)
+    skipped_in_db = 0
+
+    if total_after_file == 0:
+        return {
+            "df": deduped_file.reset_index(drop=True),
+            "skipped_in_file": skipped_in_file,
+            "skipped_in_db": 0,
+            "imported": 0,
+        }
+
+    # Step 2 — vs DB (only if rows remain)
+    conn = connection_factory() if connection_factory else get_db_connection()
+    try:
+        if conn is not None:
+            if len(pk_columns) == 1:
+                col = pk_columns[0]
+                pk_vals = deduped_file[col].dropna().astype(str).tolist()
+                if pk_vals:
+                    placeholders = ",".join(["%s"] * len(pk_vals))
+                    sql = (
+                        f"SELECT `{col}` FROM `{table}` "
+                        f"WHERE `{col}` IN ({placeholders});"
+                    )
+                    rows = execute_query(sql, tuple(pk_vals), fetch=True) or []
+                    existing = set()
+                    for r in rows:
+                        v = r.get(col)
+                        if v is not None:
+                            existing.add(str(v))
+                    if existing:
+                        mask = deduped_file[col].astype(str).isin(existing)
+                        skipped_in_db = int(mask.sum())
+                        deduped_file = deduped_file[~mask]
+            else:
+                # Composite key: (e.g., payment_retries = (transaction_id, attempt_number))
+                # Build pairs from file, query, filter
+                pairs_in_file = set()
+                for _, r in deduped_file.iterrows():
+                    key = tuple(str(r[c]) if r[c] is not None else "" for c in pk_columns)
+                    pairs_in_file.add(key)
+                if pairs_in_file:
+                    # Build SQL OR clauses for small to medium batches (safe for typical imports)
+                    where_clauses = []
+                    params = []
+                    for key in pairs_in_file:
+                        parts = []
+                        for c, v in zip(pk_columns, key):
+                            parts.append(f"`{c}` = %s")
+                            params.append(v)
+                        where_clauses.append("(" + " AND ".join(parts) + ")")
+                    where_sql = " OR ".join(where_clauses)
+                    sql = (
+                        "SELECT " + ", ".join(f"`{c}`" for c in pk_columns)
+                        + f" FROM `{table}` WHERE {where_sql};"
+                    )
+                    rows = execute_query(sql, tuple(params), fetch=True) or []
+                    existing = set()
+                    for r in rows:
+                        key = tuple(str(r.get(c, "")) for c in pk_columns)
+                        existing.add(key)
+                    if existing:
+                        mask = deduped_file.apply(
+                            lambda row: tuple(
+                                str(row[c]) if row[c] is not None else ""
+                                for c in pk_columns
+                            ) in existing,
+                            axis=1,
+                        )
+                        skipped_in_db = int(mask.sum())
+                        deduped_file = deduped_file[~mask]
+    except Exception:
+        # If DB is unreachable we cannot check against it; return file-deduped rows.
+        skipped_in_db = 0
+    finally:
+        if conn is not None:
+            close_db_connection(conn)
+
+    return {
+        "df": deduped_file.reset_index(drop=True),
+        "skipped_in_file": int(skipped_in_file),
+        "skipped_in_db": int(skipped_in_db),
+        "imported": int(len(deduped_file)),
+    }
+

@@ -2,6 +2,7 @@
 import random
 import string
 from datetime import datetime, timedelta
+import hashlib
 import sys
 import os
 
@@ -27,6 +28,11 @@ def generate_random_date(start_date, end_date):
     random_days = random.randint(0, delta.days)
     random_seconds = random.randint(0, 86399)
     return start_date + timedelta(days=random_days, seconds=random_seconds)
+
+
+def _hash_password(password):
+    """Single-round sha256 hash for test-data seeding; matches src/rbac.hash_password."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def insert_bank_response_codes():
@@ -64,6 +70,37 @@ def insert_alert_rules():
             INSERT IGNORE INTO alert_rules (rule_name, rule_type, threshold_value, threshold_condition, is_active)
             VALUES (%s, %s, %s, %s, %s)
         """, rule)
+
+
+def insert_test_users():
+    """Seed 3 test users: one per RBAC role."""
+    users = [
+        (
+            "finance_manager",
+            _hash_password("Finance@123"),
+            "FINANCE_MANAGER",
+            "finance.manager@recoverx.local",
+        ),
+        (
+            "payments_analyst",
+            _hash_password("Payments@123"),
+            "PAYMENTS_ANALYST",
+            "payments.analyst@recoverx.local",
+        ),
+        (
+            "risk_ops",
+            _hash_password("Risk@123"),
+            "RISK_OPS",
+            "risk.ops@recoverx.local",
+        ),
+    ]
+
+    for user in users:
+        execute_query("""
+            INSERT IGNORE INTO users (username, password_hash, role, email)
+            VALUES (%s, %s, %s, %s)
+        """, user)
+
 
 
 def generate_synthetic_data(num_transactions=100):
@@ -193,6 +230,7 @@ def main():
     # Insert reference data
     insert_bank_response_codes()
     insert_alert_rules()
+    insert_test_users()
 
     # Generate synthetic data
     transactions, payment_retries, failure_classifications, alerts = generate_synthetic_data(num_transactions=100)

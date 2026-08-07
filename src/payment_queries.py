@@ -1,60 +1,12 @@
+
 import pandas as pd
 
 from src.db import execute_query
-
-day4-failure-analysis-table
 
 
 def _get_total(query, params=None):
     result = execute_query(query, params, fetch=True)
     return result[0]["total"] if result else 0
-
-
-def get_filtered_failed_transactions(
-    failure_type: str = None,
-    response_code: str = None,
-    gateway: str = None,
-    payment_method: str = None,
-    start_date: str = None,
-    end_date: str = None,
-):
-    query = """
-    SELECT DISTINCT
-        t.transaction_id, t.customer_id, t.amount, t.currency,
-        t.payment_method, t.gateway, t.final_status, t.created_at,
-        pr.response_code,
-        COALESCE(fc.failure_type, brc.failure_type) AS failure_type,
-        COALESCE(brc.description, fc.root_cause) AS failure_description
-    FROM transactions t
-    LEFT JOIN payment_retries pr ON t.transaction_id = pr.transaction_id
-    LEFT JOIN bank_response_codes brc ON pr.response_code = brc.response_code
-    LEFT JOIN failure_classifications fc ON t.transaction_id = fc.transaction_id
-    WHERE t.final_status != 'SUCCESS'
-    """
-    params = []
-    if failure_type:
-        query += " AND COALESCE(fc.failure_type, brc.failure_type) = %s"
-        params.append(failure_type)
-    if response_code:
-        query += " AND pr.response_code = %s"
-        params.append(response_code)
-    if gateway:
-        query += " AND t.gateway = %s"
-        params.append(gateway)
-    if payment_method:
-        query += " AND t.payment_method = %s"
-        params.append(payment_method)
-    if start_date:
-        query += " AND t.created_at >= %s"
-        params.append(start_date)
-    if end_date:
-        query += " AND t.created_at <= %s"
-        params.append(end_date)
- main
-
-    query += " ORDER BY t.created_at DESC"
-    rows = execute_query(query, tuple(params), fetch=True)
-    return pd.DataFrame(rows or [])
 
 
 # -----------------------------
@@ -71,12 +23,8 @@ def get_all_transactions(page=1, limit=10):
     """
     return execute_query(query, (limit, offset), fetch=True)
 
-def count_all_transactions():
-    query = """
-    SELECT COUNT(*) AS total
-    FROM transactions;
-    """
-    return _get_total(query)
+def count_all_transactions(start_date=None, end_date=None):
+    return get_total_transactions(start_date, end_date)
 
 
 def get_transaction_by_id(transaction_id):
@@ -287,34 +235,172 @@ def count_response_code_analysis():
     return _get_total(query)
 
 
+def get_inter_retry_times():
+    """
+    Return the time gap in minutes between consecutive retry attempts for each transaction.
+    """
+    query = """
+    SELECT transaction_id, attempt_number, retry_timestamp
+    FROM payment_retries
+    ORDER BY transaction_id, attempt_number;
+    """
+    rows = execute_query(query, fetch=True) or []
+
+    if not rows:
+        return []
+
+    df = pd.DataFrame(rows)
+    df["retry_timestamp"] = pd.to_datetime(df["retry_timestamp"], errors="coerce")
+    df = df.dropna(subset=["retry_timestamp"]).copy()
+
+    gap_rows = []
+    for _, transaction_retries in df.groupby("transaction_id", sort=False):
+        ordered = transaction_retries.sort_values("attempt_number")
+        prev_time = None
+        for _, row in ordered.iterrows():
+            current_time = row["retry_timestamp"]
+            if prev_time is not None:
+                delta_min = round((current_time - prev_time).total_seconds() / 60.0, 1)
+                if delta_min >= 0:
+                    gap_rows.append({"gap_minutes": delta_min})
+            prev_time = current_time
+
+    return gap_rows
+
+
+def get_retry_success_by_gap():
+    """
+    Return retry success rate grouped by inter-retry gap bucket.
+    """
+    query = """
+    SELECT transaction_id, attempt_number, retry_timestamp, retry_status
+    FROM payment_retries
+    ORDER BY transaction_id, attempt_number;
+    """
+    rows = execute_query(query, fetch=True) or []
+    if not rows:
+        return []
+
+    df = pd.DataFrame(rows)
+    df["retry_timestamp"] = pd.to_datetime(df["retry_timestamp"], errors="coerce")
+    df = df.dropna(subset=["retry_timestamp"]).copy()
+
+    result = []
+    for _, transaction_retries in df.groupby("transaction_id", sort=False):
+        ordered = transaction_retries.sort_values("attempt_number")
+        prev_time = None
+        for _, row in ordered.iterrows():
+            current_time = row["retry_timestamp"]
+            if prev_time is not None:
+                delta_min = (current_time - prev_time).total_seconds() / 60.0
+                if delta_min >= 0:
+                    if delta_min <= 1:
+                        bucket = "0-1 min"
+                    elif delta_min <= 5:
+                        bucket = "1-5 min"
+                    elif delta_min <= 15:
+                        bucket = "5-15 min"
+                    elif delta_min <= 30:
+                        bucket = "15-30 min"
+                    elif delta_min <= 60:
+                        bucket = "30-60 min"
+                    else:
+                        bucket = "60+ min"
+
+                    existing = next((item for item in result if item["gap_bucket"] == bucket), None)
+                    if existing is None:
+                        result.append({"gap_bucket": bucket, "total_attempts": 0, "successful": 0, "failed": 0, "success_rate": 0.0})
+                        existing = result[-1]
+                    existing["total_attempts"] += 1
+                    if str(row.get("retry_status", "")).upper() == "SUCCESS":
+                        existing["successful"] += 1
+                    else:
+                        existing["failed"] += 1
+            prev_time = current_time
+
+    for item in result:
+        total = int(item.get("total_attempts", 0) or 0)
+        success = int(item.get("successful", 0) or 0)
+        item["success_rate"] = round((success / total) * 100, 1) if total else 0.0
+
+    return result
+
+
+def get_retry_success_by_hour():
+    """
+    Return retry success rate grouped by hour of day.
+    """
+    query = """
+    SELECT retry_timestamp, retry_status
+    FROM payment_retries
+    WHERE retry_timestamp IS NOT NULL;
+    """
+    rows = execute_query(query, fetch=True) or []
+    if not rows:
+        return []
+
+    df = pd.DataFrame(rows)
+    df["retry_timestamp"] = pd.to_datetime(df["retry_timestamp"], errors="coerce")
+    df = df.dropna(subset=["retry_timestamp"]).copy()
+    df["hour_of_day"] = df["retry_timestamp"].dt.hour
+
+    result = []
+    for hour in range(24):
+        hour_rows = df[df["hour_of_day"] == hour]
+        total = int(len(hour_rows))
+        successful = int((hour_rows["retry_status"].astype(str).str.upper() == "SUCCESS").sum())
+        result.append({
+            "hour_of_day": hour,
+            "total_attempts": total,
+            "successful": successful,
+            "failed": total - successful,
+            "success_rate": round((successful / total) * 100, 1) if total else 0.0,
+        })
+
+    return result
+
+
 # -----------------------------
 # Analytics
 # -----------------------------
 
-def get_total_transactions():
-    query = """
-    SELECT COUNT(*) AS total_transactions
-    FROM transactions;
-    """
-    return execute_query(query, fetch=True)
+def get_total_transactions(start_date=None, end_date=None):
+    query = "SELECT COUNT(*) AS total FROM transactions WHERE 1=1"
+    params = []
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+    query += ";"
+    return _get_total(query, tuple(params) if params else None)
 
 
-def get_successful_transactions():
-    query = """
-    SELECT COUNT(*) AS successful_transactions
-    FROM transactions
-    WHERE final_status='SUCCESS';
-    """
-    return execute_query(query, fetch=True)
+def get_successful_transactions(start_date=None, end_date=None):
+    query = "SELECT COUNT(*) AS total FROM transactions WHERE final_status='SUCCESS'"
+    params = []
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+    query += ";"
+    return _get_total(query, tuple(params) if params else None)
 
 
-def get_failed_transactions():
-    query = """
-    SELECT COUNT(*) AS failed_transactions
-    FROM transactions
-    WHERE final_status='FAILED';
-    """
-    return execute_query(query, fetch=True)
+def get_failed_transactions(start_date=None, end_date=None):
+    query = "SELECT COUNT(*) AS total FROM transactions WHERE final_status='FAILED'"
+    params = []
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+    query += ";"
+    return _get_total(query, tuple(params) if params else None)
 
 
 def get_filtered_transactions(
@@ -355,7 +441,6 @@ def get_filtered_transactions(
     return pd.DataFrame(rows or [])
 
 
- day4-failure-analysis-table
 def count_filtered_transactions(
     transaction_id: str = None,
     customer_id: str = None,
@@ -433,6 +518,45 @@ def get_payment_retries(transaction_id):
     return get_retry_history(transaction_id, limit=None)
 
 
+def get_recent_transactions(limit=5, start_date=None, end_date=None):
+    """
+    Recent transactions for the Dashboard "Recent Transactions" table.
+
+    Returns a DataFrame of the most recent transactions, default LIMIT 5.
+    Joins in retry count so the Dashboard can show # of retries.
+    """
+    query = """
+    SELECT
+        t.transaction_id,
+        t.customer_id,
+        t.amount,
+        t.currency,
+        t.payment_method,
+        t.gateway,
+        t.final_status,
+        t.created_at,
+        COALESCE(retries.cnt, 0) AS retry_count
+    FROM transactions t
+    LEFT JOIN (
+        SELECT transaction_id, COUNT(*) AS cnt
+        FROM payment_retries
+        GROUP BY transaction_id
+    ) retries ON t.transaction_id = retries.transaction_id
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+    query += " ORDER BY t.created_at DESC LIMIT %s;"
+    params.append(int(limit))
+    rows = execute_query(query, tuple(params), fetch=True)
+    return pd.DataFrame(rows or [])
+
+
 # -----------------------------
 # Failed Transactions (filtered, for Failure Analysis page)
 # -----------------------------
@@ -487,8 +611,6 @@ def get_filtered_failed_transactions(
 # Failure Breakdown Charts
 # -----------------------------
 
-
-main
 def get_failure_breakdown_by_response_code():
     query = """
     SELECT
@@ -498,7 +620,7 @@ def get_failure_breakdown_by_response_code():
     FROM payment_retries pr
     LEFT JOIN bank_response_codes brc
         ON pr.response_code = brc.response_code
-    WHERE pr.retry_status = 'FAILED'
+    WHERE UPPER(pr.retry_status) != 'SUCCESS'
     GROUP BY pr.response_code, brc.description
     ORDER BY count DESC;
     """
@@ -528,9 +650,6 @@ def get_failure_breakdown_by_payment_method():
     GROUP BY payment_method
     ORDER BY count DESC;
     """
- day4-failure-analysis-table
-    return execute_query(query, fetch=True)
-
     return execute_query(query, fetch=True)
 
 
@@ -552,7 +671,7 @@ def get_failure_causes_distribution():
         FROM payment_retries pr
         LEFT JOIN bank_response_codes brc
             ON pr.response_code = brc.response_code
-        WHERE pr.retry_status = 'FAILED'
+        WHERE UPPER(pr.retry_status) != 'SUCCESS'
         GROUP BY brc.description
         ORDER BY count DESC;
         """
@@ -606,4 +725,712 @@ def get_retry_success_rate_per_attempt():
         return placeholder
     return result
 
- main
+
+# -----------------------------
+# Dashboard Payment Methods
+# -----------------------------
+
+def get_payment_method_amounts(start_date=None, end_date=None):
+    """
+    Return sum(amount) grouped by payment_method for the Dashboard
+    payment methods bar chart.
+
+    Returns list of dicts: [{"payment_method": str, "total_amount": float}, ...]
+    """
+    query = """
+    SELECT
+        COALESCE(payment_method, 'Unknown') AS payment_method,
+        COALESCE(SUM(amount), 0) AS total_amount
+    FROM transactions
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+    query += " GROUP BY payment_method ORDER BY total_amount DESC;"
+    rows = execute_query(query, tuple(params) if params else None, fetch=True)
+    if not rows:
+        return [
+            {"payment_method": "Credit Card", "total_amount": 45000},
+            {"payment_method": "Debit Card", "total_amount": 30000},
+            {"payment_method": "Net Banking", "total_amount": 25000},
+            {"payment_method": "UPI", "total_amount": 15000},
+        ]
+    cleaned = []
+    for r in rows:
+        amt = r.get("total_amount", 0) or 0
+        try:
+            amt = float(amt)
+        except (TypeError, ValueError):
+            amt = 0.0
+        cleaned.append({
+            "payment_method": r.get("payment_method", "Unknown") or "Unknown",
+            "total_amount": amt,
+        })
+    return cleaned
+
+
+# -----------------------------
+# Revenue Recovery
+# -----------------------------
+
+def get_high_value_failed_transactions(limit=20, min_amount=0, start_date=None, end_date=None):
+    """
+    Return high-value failed transactions prioritised by
+    (recovery_score * amount) descending.
+
+    recovery_score is sourced from bank_response_codes.recovery_potential
+    (fallback to 0.5 when missing).
+
+    Returns list of dicts with transaction details, recovery_score,
+    priority_score = recovery_score * amount.
+    """
+    query = """
+    SELECT
+        t.transaction_id,
+        t.customer_id,
+        t.amount,
+        t.currency,
+        t.payment_method,
+        t.gateway,
+        t.final_status,
+        t.created_at,
+        COALESCE(
+            CASE
+                WHEN brc.recovery_potential IS NULL OR brc.recovery_potential = ''
+                THEN 0.5
+                ELSE CAST(brc.recovery_potential AS DECIMAL(5,2))
+            END,
+            0.5
+        ) AS recovery_score,
+        (
+            COALESCE(
+                CASE
+                    WHEN brc.recovery_potential IS NULL OR brc.recovery_potential = ''
+                    THEN 0.5
+                    ELSE CAST(brc.recovery_potential AS DECIMAL(5,2))
+                END,
+                0.5
+            ) * t.amount
+        ) AS priority_score
+    FROM transactions t
+    LEFT JOIN payment_retries pr
+        ON t.transaction_id = pr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON pr.response_code = brc.response_code
+    WHERE t.final_status != 'SUCCESS'
+      AND t.amount >= %s
+    """
+    params = [float(min_amount)]
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+    query += """
+    GROUP BY
+        t.transaction_id, t.customer_id, t.amount, t.currency,
+        t.payment_method, t.gateway, t.final_status, t.created_at,
+        recovery_score
+    ORDER BY priority_score DESC, t.amount DESC
+    LIMIT %s;
+    """
+    params.append(int(limit))
+    rows = execute_query(query, tuple(params), fetch=True)
+    return rows or []
+
+
+def get_revenue_recovery_summary(start_date=None, end_date=None):
+    """
+    Aggregate summary metrics for the Revenue Recovery page and
+    the revenue_loss alert rule type.
+
+    Returns dict with keys:
+      total_failed_amount, recoverable_revenue, permanently_lost_revenue,
+      recovered_revenue, avg_recovery_score, high_value_failed_count.
+    """
+    query = """
+    SELECT
+        COALESCE(SUM(t.amount), 0)                            AS total_failed_amount,
+        COALESCE(
+            SUM(
+                t.amount *
+                COALESCE(
+                    CASE
+                        WHEN brc.recovery_potential IS NULL OR brc.recovery_potential = ''
+                        THEN 0.5
+                        ELSE CAST(brc.recovery_potential AS DECIMAL(5,2))
+                    END,
+                    0.5
+                )
+            ),
+            0
+        ) AS recoverable_revenue,
+        COALESCE(
+            SUM(
+                t.amount *
+                (1 - COALESCE(
+                    CASE
+                        WHEN brc.recovery_potential IS NULL OR brc.recovery_potential = ''
+                        THEN 0.5
+                        ELSE CAST(brc.recovery_potential AS DECIMAL(5,2))
+                    END,
+                    0.5
+                ))
+            ),
+            0
+        ) AS permanently_lost_revenue,
+        COALESCE(
+            SUM(CASE WHEN t.final_status = 'SUCCESS' AND EXISTS (
+                SELECT 1 FROM payment_retries pr2
+                WHERE pr2.transaction_id = t.transaction_id
+            ) THEN t.amount ELSE 0 END),
+            0
+        ) AS recovered_revenue,
+        COALESCE(
+            AVG(
+                COALESCE(
+                    CASE
+                        WHEN brc.recovery_potential IS NULL OR brc.recovery_potential = ''
+                        THEN 0.5
+                        ELSE CAST(brc.recovery_potential AS DECIMAL(5,2))
+                    END,
+                    0.5
+                )
+            ),
+            0
+        ) AS avg_recovery_score,
+        COUNT(DISTINCT CASE
+            WHEN t.final_status != 'SUCCESS' AND t.amount >= 100
+            THEN t.transaction_id ELSE NULL
+        END) AS high_value_failed_count
+    FROM transactions t
+    LEFT JOIN payment_retries pr
+        ON t.transaction_id = pr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON pr.response_code = brc.response_code
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+    query += ";"
+    rows = execute_query(query, tuple(params) if params else None, fetch=True)
+    if not rows:
+        return {
+            "total_failed_amount": 0.0,
+            "recoverable_revenue": 0.0,
+            "permanently_lost_revenue": 0.0,
+            "recovered_revenue": 0.0,
+            "avg_recovery_score": 0.0,
+            "high_value_failed_count": 0,
+        }
+    row = rows[0]
+
+    def _f(v, default=0.0):
+        try:
+            return float(v) if v is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    summary = {
+        "total_failed_amount": _f(row.get("total_failed_amount")),
+        "recoverable_revenue": _f(row.get("recoverable_revenue")),
+        "permanently_lost_revenue": _f(row.get("permanently_lost_revenue")),
+        "recovered_revenue": _f(row.get("recovered_revenue")),
+        "avg_recovery_score": _f(row.get("avg_recovery_score")),
+        "high_value_failed_count": int(row.get("high_value_failed_count") or 0),
+    }
+    return summary
+
+
+# -----------------------------
+# Retry Analytics - Ineffective Patterns
+# -----------------------------
+
+def get_ineffective_retry_patterns(threshold_success_rate=40.0):
+    """
+    Identify banks/gateways/attempt combos whose retry success rate is
+    below the given threshold (percentage, e.g. 40 means 40%).
+
+    Returns list of dicts with keys:
+      group_type (gateway/attempt/response_code), group_key,
+      total_attempts, successful, failed, success_rate.
+    """
+    threshold = float(threshold_success_rate)
+    results = []
+
+    gateway_query = """
+    SELECT
+        t.gateway                                             AS group_key,
+        'gateway'                                             AS group_type,
+        COUNT(*)                                              AS total_attempts,
+        SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS'
+                 THEN 1 ELSE 0 END)                           AS successful,
+        SUM(CASE WHEN UPPER(pr.retry_status) != 'SUCCESS'
+                 THEN 1 ELSE 0 END)                           AS failed
+    FROM payment_retries pr
+    JOIN transactions t ON pr.transaction_id = t.transaction_id
+    WHERE t.gateway IS NOT NULL AND t.gateway != ''
+    GROUP BY t.gateway
+    HAVING COUNT(*) >= 5
+       AND (
+           (SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0)
+           / NULLIF(COUNT(*), 0)
+       ) < %s
+    ORDER BY (
+        (SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0)
+        / NULLIF(COUNT(*), 0)
+    ) ASC;
+    """
+    rows = execute_query(gateway_query, (threshold,), fetch=True) or []
+    for r in rows:
+        total = int(r.get("total_attempts", 0) or 0)
+        ok = int(r.get("successful", 0) or 0)
+        rate = round((ok / total) * 100, 1) if total else 0.0
+        results.append({
+            "group_type": r.get("group_type", "gateway"),
+            "group_key": r.get("group_key", "Unknown"),
+            "total_attempts": total,
+            "successful": ok,
+            "failed": int(r.get("failed", 0) or 0),
+            "success_rate": rate,
+        })
+
+    attempt_query = """
+    SELECT
+        CAST(pr.attempt_number AS CHAR)                       AS group_key,
+        'attempt'                                             AS group_type,
+        COUNT(*)                                              AS total_attempts,
+        SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS'
+                 THEN 1 ELSE 0 END)                           AS successful,
+        SUM(CASE WHEN UPPER(pr.retry_status) != 'SUCCESS'
+                 THEN 1 ELSE 0 END)                           AS failed
+    FROM payment_retries pr
+    GROUP BY pr.attempt_number
+    HAVING COUNT(*) >= 5
+       AND (
+           (SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0)
+           / NULLIF(COUNT(*), 0)
+       ) < %s
+    ORDER BY (
+        (SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0)
+        / NULLIF(COUNT(*), 0)
+    ) ASC;
+    """
+    rows = execute_query(attempt_query, (threshold,), fetch=True) or []
+    for r in rows:
+        total = int(r.get("total_attempts", 0) or 0)
+        ok = int(r.get("successful", 0) or 0)
+        rate = round((ok / total) * 100, 1) if total else 0.0
+        results.append({
+            "group_type": r.get("group_type", "attempt"),
+            "group_key": f"Attempt #{r.get('group_key', '?')}",
+            "total_attempts": total,
+            "successful": ok,
+            "failed": int(r.get("failed", 0) or 0),
+            "success_rate": rate,
+        })
+
+    rc_query = """
+    SELECT
+        COALESCE(pr.response_code, 'Unknown')                 AS group_key,
+        'response_code'                                       AS group_type,
+        COUNT(*)                                              AS total_attempts,
+        SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS'
+                 THEN 1 ELSE 0 END)                           AS successful,
+        SUM(CASE WHEN UPPER(pr.retry_status) != 'SUCCESS'
+                 THEN 1 ELSE 0 END)                           AS failed
+    FROM payment_retries pr
+    GROUP BY pr.response_code
+    HAVING COUNT(*) >= 5
+       AND (
+           (SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0)
+           / NULLIF(COUNT(*), 0)
+       ) < %s
+    ORDER BY (
+        (SUM(CASE WHEN UPPER(pr.retry_status) = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0)
+        / NULLIF(COUNT(*), 0)
+    ) ASC;
+    """
+    rows = execute_query(rc_query, (threshold,), fetch=True) or []
+    for r in rows:
+        total = int(r.get("total_attempts", 0) or 0)
+        ok = int(r.get("successful", 0) or 0)
+        rate = round((ok / total) * 100, 1) if total else 0.0
+        results.append({
+            "group_type": r.get("group_type", "response_code"),
+            "group_key": r.get("group_key", "Unknown"),
+            "total_attempts": total,
+            "successful": ok,
+            "failed": int(r.get("failed", 0) or 0),
+            "success_rate": rate,
+        })
+
+    return results
+
+
+# -----------------------------
+# Alerts Engine
+# -----------------------------
+
+def generate_alerts_from_rules(rules, start_date=None, end_date=None):
+    """
+    Evaluate a list of alert rules and return any active alerts that are
+    currently triggered.
+
+    Each rule is a dict with:
+      rule_id, rule_type, severity, threshold, metric, name (optional)
+
+    Supported rule_type values:
+      - failure_rate      : overall transaction failure % > threshold
+      - retry_rate        : retry attempt ratio > threshold
+      - success_rate_drop : success rate below threshold %
+      - revenue_loss      : recoverable_revenue >= threshold (amount)
+    """
+    if not rules:
+        return []
+
+    alerts = []
+    summary = get_revenue_recovery_summary(start_date, end_date)
+
+    total_tx_count = _get_total(
+        "SELECT COUNT(*) AS total FROM transactions WHERE 1=1"
+        + (" AND created_at >= %s" if start_date else "")
+        + (" AND created_at <= %s" if end_date else "")
+        + ";",
+        tuple(
+            ([start_date] if start_date else []) +
+            ([end_date] if end_date else [])
+        ) or None,
+    ) or 0
+
+    failed_tx_count = _get_total(
+        "SELECT COUNT(*) AS total FROM transactions WHERE final_status != 'SUCCESS'"
+        + (" AND created_at >= %s" if start_date else "")
+        + (" AND created_at <= %s" if end_date else "")
+        + ";",
+        tuple(
+            ([start_date] if start_date else []) +
+            ([end_date] if end_date else [])
+        ) or None,
+    ) or 0
+
+    success_tx_count = _get_total(
+        "SELECT COUNT(*) AS total FROM transactions WHERE final_status = 'SUCCESS'"
+        + (" AND created_at >= %s" if start_date else "")
+        + (" AND created_at <= %s" if end_date else "")
+        + ";",
+        tuple(
+            ([start_date] if start_date else []) +
+            ([end_date] if end_date else [])
+        ) or None,
+    ) or 0
+
+    retry_count = _get_total(
+        """
+        SELECT COUNT(*) AS total FROM payment_retries pr
+        JOIN transactions t ON pr.transaction_id = t.transaction_id
+        WHERE 1=1
+        """
+        + (" AND t.created_at >= %s" if start_date else "")
+        + (" AND t.created_at <= %s" if end_date else "")
+        + ";",
+        tuple(
+            ([start_date] if start_date else []) +
+            ([end_date] if end_date else [])
+        ) or None,
+    ) or 0
+
+    failure_rate_pct = (failed_tx_count / total_tx_count) * 100 if total_tx_count else 0.0
+    success_rate_pct = (success_tx_count / total_tx_count) * 100 if total_tx_count else 0.0
+    retry_rate_pct = (retry_count / total_tx_count) * 100 if total_tx_count else 0.0
+
+    for rule in rules:
+        rule_type = str(rule.get("rule_type", "")).lower()
+        threshold = rule.get("threshold")
+        severity = str(rule.get("severity", "MEDIUM")).upper()
+        rule_id = rule.get("rule_id")
+        rule_name = rule.get("name") or f"Rule {rule_id}"
+
+        triggered = False
+        current_value = None
+        message = ""
+
+        try:
+            threshold_f = float(threshold) if threshold is not None else None
+        except (TypeError, ValueError):
+            threshold_f = None
+
+        if rule_type == "failure_rate":
+            current_value = round(failure_rate_pct, 1)
+            if threshold_f is not None and failure_rate_pct > threshold_f:
+                triggered = True
+                message = (
+                    f"Failure rate {current_value}% exceeds threshold "
+                    f"{threshold_f}%"
+                )
+
+        elif rule_type == "retry_rate":
+            current_value = round(retry_rate_pct, 1)
+            if threshold_f is not None and retry_rate_pct > threshold_f:
+                triggered = True
+                message = (
+                    f"Retry rate {current_value}% exceeds threshold "
+                    f"{threshold_f}%"
+                )
+
+        elif rule_type == "success_rate_drop":
+            current_value = round(success_rate_pct, 1)
+            if threshold_f is not None and success_rate_pct < threshold_f:
+                triggered = True
+                message = (
+                    f"Success rate {current_value}% dropped below threshold "
+                    f"{threshold_f}%"
+                )
+
+        elif rule_type == "revenue_loss":
+            current_value = float(summary.get("recoverable_revenue", 0.0) or 0.0)
+            if threshold_f is not None and current_value >= threshold_f:
+                triggered = True
+                message = (
+                    f"Recoverable revenue ${current_value:,.2f} has crossed "
+                    f"threshold ${threshold_f:,.2f}"
+                )
+
+        if triggered:
+            alerts.append({
+                "rule_id": rule_id,
+                "rule_type": rule_type,
+                "severity": severity,
+                "name": rule_name,
+                "threshold": threshold,
+                "current_value": current_value,
+                "message": message,
+            })
+
+    return alerts
+
+
+def generate_all_alerts(start_date=None, end_date=None):
+    """
+    Convenience wrapper: runs a default set of alert rules and returns
+    both the active alerts list and the count of active alerts.
+
+    Returns dict: {"alerts": [...], "active_count": N}
+    """
+    default_rules = [
+        {
+            "rule_id": "R-001",
+            "name": "High Failure Rate",
+            "rule_type": "failure_rate",
+            "severity": "HIGH",
+            "threshold": 15.0,
+            "metric": "failure_rate_pct",
+        },
+        {
+            "rule_id": "R-002",
+            "name": "Excessive Retries",
+            "rule_type": "retry_rate",
+            "severity": "MEDIUM",
+            "threshold": 30.0,
+            "metric": "retry_rate_pct",
+        },
+        {
+            "rule_id": "R-003",
+            "name": "Success Rate Drop",
+            "rule_type": "success_rate_drop",
+            "severity": "CRITICAL",
+            "threshold": 75.0,
+            "metric": "success_rate_pct",
+        },
+        {
+            "rule_id": "R-004",
+            "name": "Revenue At Risk",
+            "rule_type": "revenue_loss",
+            "severity": "HIGH",
+            "threshold": 10000.0,
+            "metric": "recoverable_revenue",
+        },
+    ]
+    alerts = generate_alerts_from_rules(default_rules, start_date, end_date)
+    active_count = len(alerts)
+    return {"alerts": alerts, "active_count": active_count}
+
+
+# -----------------------------
+# Recovery Score Distribution (NumPy-backed)
+# -----------------------------
+
+def get_recovery_score_distribution(start_date=None, end_date=None):
+    """
+    Analyze the distribution of recovery scores across failed transactions.
+
+    Sources scores from:
+      1) failure_classifications.recovery_score (primary)
+      2) bank_response_codes.recovery_potential via payment_retries (fallback)
+
+    Uses NumPy utilities from src.numpy_utils to compute:
+      - basic_stats  : mean, median, std, min, max, count
+      - percentiles  : p10, p25, p50, p75, p90
+      - histogram    : counts & edges for 10 equal bins on [0, 1]
+
+    Returns dict with keys:
+      basic_stats, percentiles, histogram_counts, histogram_edges, scores_raw
+    """
+    try:
+        import numpy as np
+        from src.numpy_utils import (
+            calculate_basic_stats,
+            calculate_percentiles,
+            bin_data,
+        )
+    except Exception:
+        np = None
+        calculate_basic_stats = None
+        calculate_percentiles = None
+        bin_data = None
+
+    # --- Query scores ---
+    query = """
+    SELECT
+        COALESCE(fc.recovery_score, brc.recovery_potential, 0.5) AS score
+    FROM transactions t
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    LEFT JOIN payment_retries pr
+        ON t.transaction_id = pr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON pr.response_code = brc.response_code
+    WHERE t.final_status != 'SUCCESS'
+    """
+    params = []
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+    query += " GROUP BY t.transaction_id;"
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
+    raw_scores = []
+    for r in rows:
+        try:
+            v = float(r.get("score", 0.5) or 0.5)
+            v = max(0.0, min(1.0, v))
+            raw_scores.append(v)
+        except (TypeError, ValueError):
+            raw_scores.append(0.5)
+
+    # Empty dataset fallback
+    if not raw_scores:
+        return {
+            "basic_stats": {
+                "mean": 0.0, "median": 0.0, "std": 0.0,
+                "min": 0.0, "max": 0.0, "count": 0,
+            },
+            "percentiles": {
+                "p10": 0.0, "p25": 0.0, "p50": 0.0, "p75": 0.0, "p90": 0.0,
+            },
+            "histogram_counts": [],
+            "histogram_edges": [],
+            "scores_raw": [],
+        }
+
+    scores_arr = np.array(raw_scores, dtype=float) if np is not None else None
+    basic_stats: dict
+    percentiles: dict
+    hist_counts = []
+    hist_edges = []
+
+    # --- Basic stats ---
+    if calculate_basic_stats is not None and scores_arr is not None and len(scores_arr) > 0:
+        basic_stats = calculate_basic_stats(scores_arr)
+    else:
+        # Manual math fallback
+        s = sorted(raw_scores)
+        n = len(s)
+        mean = sum(s) / n
+        if n % 2 == 1:
+            median = s[n // 2]
+        else:
+            median = (s[n // 2 - 1] + s[n // 2]) / 2
+        variance = sum((x - mean) ** 2 for x in s) / n
+        std = variance ** 0.5
+        basic_stats = {
+            "mean": float(mean),
+            "median": float(median),
+            "std": float(std),
+            "min": float(min(s)),
+            "max": float(max(s)),
+            "count": int(n),
+        }
+
+    # --- Percentiles ---
+    if calculate_percentiles is not None and scores_arr is not None and len(scores_arr) > 0:
+        percentiles = calculate_percentiles(
+            scores_arr, percentiles=[10, 25, 50, 75, 90],
+        )
+    else:
+        # Manual linear-interpolation percentile math to match numpy default
+        def _manual_percentile(sorted_data, p):
+            if not sorted_data:
+                return 0.0
+            s = sorted_data
+            n = len(s)
+            if n == 1:
+                return float(s[0])
+            rank = (p / 100.0) * (n - 1)
+            lo = int(rank)
+            hi = min(lo + 1, n - 1)
+            frac = rank - lo
+            return float(s[lo] + (s[hi] - s[lo]) * frac)
+
+        s_sorted = sorted(raw_scores)
+        percentiles = {
+            f"p{p}": _manual_percentile(s_sorted, p)
+            for p in (10, 25, 50, 75, 90)
+        }
+
+    # --- Histogram ---
+    if bin_data is not None and scores_arr is not None and len(scores_arr) > 0:
+        try:
+            counts, edges = bin_data(scores_arr, bins=10)
+            hist_counts = [int(c) for c in counts]
+            hist_edges = [float(e) for e in edges]
+        except Exception:
+            counts, edges = np.histogram(scores_arr, bins=10, range=(0.0, 1.0))
+            hist_counts = [int(c) for c in counts]
+            hist_edges = [float(e) for e in edges]
+    else:
+        # Manual histogram over [0, 1] with 10 bins
+        bin_edges = [i / 10.0 for i in range(11)]
+        counts = [0] * 10
+        for v in raw_scores:
+            idx = min(int(v * 10), 9)
+            if idx < 0:
+                idx = 0
+            counts[idx] += 1
+        hist_counts = counts
+        hist_edges = bin_edges
+
+    return {
+        "basic_stats": basic_stats,
+        "percentiles": percentiles,
+        "histogram_counts": hist_counts,
+        "histogram_edges": hist_edges,
+        "scores_raw": raw_scores,
+    }
+
+
+

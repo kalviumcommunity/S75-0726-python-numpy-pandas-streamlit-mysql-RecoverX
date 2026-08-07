@@ -7,7 +7,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
 from src.payment_queries import (
     get_filtered_transactions,
     count_filtered_transactions,
@@ -16,9 +16,41 @@ from src.payment_queries import (
     get_retry_history
 )
 
+@st.cache_data(ttl=60)
+def _cached_get_filtered_transactions(start_date=None, end_date=None, transaction_id=None,
+                                   customer_id=None, status=None, limit=100, offset=0):
+    return get_filtered_transactions(start_date, end_date, transaction_id,
+                                     customer_id, status, limit, offset)
+
+@st.cache_data(ttl=60)
+def _cached_count_filtered_transactions(start_date=None, end_date=None, transaction_id=None,
+                                      customer_id=None, status=None):
+    return count_filtered_transactions(start_date, end_date, transaction_id,
+                                      customer_id, status)
+
+@st.cache_data(ttl=60)
+def _cached_get_transaction_status_over_time(start_date=None, end_date=None):
+    return get_transaction_status_over_time(start_date, end_date)
+
+@st.cache_data(ttl=60)
+def _cached_get_retry_attempts_distribution(start_date=None, end_date=None):
+    return get_retry_attempts_distribution(start_date, end_date)
+
+@st.cache_data(ttl=60)
+def _cached_get_retry_history(transaction_id):
+    return get_retry_history(transaction_id)
+
+get_filtered_transactions = _cached_get_filtered_transactions
+count_filtered_transactions = _cached_count_filtered_transactions
+get_transaction_status_over_time = _cached_get_transaction_status_over_time
+get_retry_attempts_distribution = _cached_get_retry_attempts_distribution
+get_retry_history = _cached_get_retry_history
+
 setup_page("Payment Lifecycle", "🔄")
 render_header()
 date_range = render_sidebar()
+
+require_page_permission("Payment Lifecycle")
 
 st.subheader("Track complete journey of payments")
 st.divider()

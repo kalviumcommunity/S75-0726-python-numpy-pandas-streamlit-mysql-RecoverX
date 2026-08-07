@@ -374,3 +374,173 @@ def retry_success_rate_per_attempt_chart(data=None):
 
     return fig
 
+
+def inter_retry_gap_histogram(data=None):
+    """
+    Histogram of time gaps between consecutive retries.
+    data is list of dicts from get_inter_retry_times().
+    """
+    if not data:
+        gaps = [1, 2, 2, 5, 5, 5, 10, 10, 15, 15, 30, 30, 45, 60, 60, 90, 120] * 5
+    else:
+        gaps = [int(d.get("gap_minutes", 0) or 0) for d in data]
+
+    df = pd.DataFrame({"gap_minutes": gaps})
+    fig = px.histogram(
+        df,
+        x="gap_minutes",
+        nbins=20,
+        color_discrete_sequence=["#2563eb"],
+        title=None,
+    )
+    fig.update_layout(
+        height=350,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis_title="Gap Between Retries (minutes)",
+        yaxis_title="Number of Retry Pairs",
+        bargap=0.1,
+    )
+    return fig
+
+
+def retry_success_by_hour_chart(data=None):
+    """
+    Bar chart of retry success rate by hour of day.
+    data is list of dicts from get_retry_success_by_hour().
+    """
+    if not data:
+        rows = []
+        for h in range(24):
+            total = 50 + ((h - 12) ** 2) * 2
+            ok = round(total * (0.3 + 0.4 * abs(12 - h) / 24 if h < 20 and h > 6 else 0.2))
+            rate = round((ok / total) * 100, 1) if total else 0.0
+            rows.append({"hour_of_day": h, "success_rate": rate, "total_attempts": total})
+        df = pd.DataFrame(rows)
+    else:
+        df = pd.DataFrame(data)
+
+    if df.empty:
+        rows = []
+        for h in range(24):
+            total = 50 + ((h - 12) ** 2) * 2
+            ok = round(total * (0.3 + 0.4 * abs(12 - h) / 24 if h < 20 and h > 6 else 0.2))
+            rate = round((ok / total) * 100, 1) if total else 0.0
+            rows.append({"hour_of_day": h, "success_rate": rate, "total_attempts": total})
+        df = pd.DataFrame(rows)
+
+    df["hour_label"] = df["hour_of_day"].apply(lambda h: f"{h:02d}:00")
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df["hour_label"],
+        y=df["total_attempts"],
+        name="Total Attempts",
+        marker_color="#38bdf8",
+        hovertemplate="Hour %{x}<br>Total Attempts: %{y}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["hour_label"],
+        y=df["success_rate"],
+        name="Success Rate (%)",
+        mode="lines+markers",
+        yaxis="y2",
+        line_color="#16a34a",
+        marker=dict(color="#16a34a", size=7),
+        hovertemplate="Hour %{x}<br>Success Rate: %{y}%<extra></extra>",
+    ))
+    fig.update_layout(
+        height=380,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis=dict(title="Hour of Day", tickangle=-45),
+        yaxis=dict(title="Total Attempts", side="left"),
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 105],
+            showgrid=False,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+        hovermode="x unified",
+    )
+    return fig
+
+
+def retry_success_by_gap_chart(data=None):
+    """
+    Bar chart of retry success rate by gap bucket.
+    data is list of dicts from get_retry_success_by_gap().
+    """
+    if not data or not any(int(d.get("total_attempts", 0) or 0) > 0 for d in data):
+        data = [
+            {"gap_bucket": "0-1 min", "success_rate": 35.2, "total_attempts": 120, "successful": 42, "failed": 78},
+            {"gap_bucket": "1-5 min", "success_rate": 52.1, "total_attempts": 240, "successful": 125, "failed": 115},
+            {"gap_bucket": "5-15 min", "success_rate": 61.8, "total_attempts": 180, "successful": 111, "failed": 69},
+            {"gap_bucket": "15-30 min", "success_rate": 57.3, "total_attempts": 95, "successful": 54, "failed": 41},
+            {"gap_bucket": "30-60 min", "success_rate": 48.7, "total_attempts": 65, "successful": 31, "failed": 34},
+            {"gap_bucket": "60+ min", "success_rate": 41.5, "total_attempts": 40, "successful": 16, "failed": 24},
+        ]
+
+    df = pd.DataFrame(data)
+    if df.empty:
+        data = [
+            {"gap_bucket": "0-1 min", "success_rate": 35.2, "total_attempts": 120, "successful": 42, "failed": 78},
+            {"gap_bucket": "1-5 min", "success_rate": 52.1, "total_attempts": 240, "successful": 125, "failed": 115},
+            {"gap_bucket": "5-15 min", "success_rate": 61.8, "total_attempts": 180, "successful": 111, "failed": 69},
+            {"gap_bucket": "15-30 min", "success_rate": 57.3, "total_attempts": 95, "successful": 54, "failed": 41},
+            {"gap_bucket": "30-60 min", "success_rate": 48.7, "total_attempts": 65, "successful": 31, "failed": 34},
+            {"gap_bucket": "60+ min", "success_rate": 41.5, "total_attempts": 40, "successful": 16, "failed": 24},
+        ]
+        df = pd.DataFrame(data)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df["gap_bucket"],
+        y=df["total_attempts"],
+        name="Total Attempts",
+        marker_color="#0ea5e9",
+        hovertemplate="Gap %{x}<br>Total Attempts: %{y}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["gap_bucket"],
+        y=df["success_rate"],
+        name="Success Rate (%)",
+        mode="lines+markers+text",
+        yaxis="y2",
+        line_color="#16a34a",
+        line_width=3,
+        marker=dict(color="#16a34a", size=9),
+        text=[f"{v}%" for v in df["success_rate"]],
+        textposition="top center",
+        textfont=dict(color="#16a34a", size=11),
+        hovertemplate="Gap %{x}<br>Success Rate: %{y}%<extra></extra>",
+    ))
+    fig.update_layout(
+        height=380,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        xaxis=dict(title="Gap Between Retries"),
+        yaxis=dict(title="Total Attempts", side="left"),
+        yaxis2=dict(
+            title="Success Rate (%)",
+            overlaying="y",
+            side="right",
+            range=[0, 105],
+            showgrid=False,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+        hovermode="x unified",
+    )
+    return fig
+

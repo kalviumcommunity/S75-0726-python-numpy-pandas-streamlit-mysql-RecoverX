@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_customer (customer_id),
     INDEX idx_created (created_at),
-    INDEX idx_final_status (final_status)
+    INDEX idx_final_status (final_status),
+    INDEX idx_status_created (final_status, created_at)
 );
 
 CREATE TABLE IF NOT EXISTS payment_retries (
@@ -26,7 +27,8 @@ CREATE TABLE IF NOT EXISTS payment_retries (
     response_message TEXT,
     FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE,
     INDEX idx_transaction (transaction_id),
-    INDEX idx_retry_time (retry_timestamp)
+    INDEX idx_retry_time (retry_timestamp),
+    INDEX idx_status_time (retry_status, retry_timestamp)
 );
 
 CREATE TABLE IF NOT EXISTS bank_response_codes (
@@ -52,7 +54,8 @@ CREATE TABLE IF NOT EXISTS failure_classifications (
         ON DELETE CASCADE,
     INDEX idx_transaction (transaction_id),
     INDEX idx_failure_type (failure_type),
-    INDEX idx_recovery_score (recovery_score)
+    INDEX idx_recovery_score (recovery_score),
+    INDEX idx_failure_score (failure_type, recovery_score)
 );
 
 CREATE TABLE IF NOT EXISTS alert_rules (
@@ -78,5 +81,17 @@ CREATE TABLE IF NOT EXISTS alerts (
     FOREIGN KEY (rule_id) REFERENCES alert_rules(rule_id) ON DELETE SET NULL,
     INDEX idx_severity (severity),
     INDEX idx_created (created_at),
-    INDEX idx_resolved (is_resolved)
+    INDEX idx_resolved (is_resolved),
+    INDEX idx_resolved_severity_created (is_resolved, severity, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role ENUM('FINANCE_MANAGER','PAYMENTS_ANALYST','RISK_OPS') NOT NULL,
+    email VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_username (username),
+    INDEX idx_role (role)
 );

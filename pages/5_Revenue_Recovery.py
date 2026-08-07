@@ -3,12 +3,14 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 import streamlit as st
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
 from src.charts import placeholder_revenue_recovery
 
 setup_page("Revenue Recovery", "💸")
 render_header()
 date_range = render_sidebar()
+
+require_page_permission("Revenue Recovery")
 
 st.subheader("Identify and track recoverable revenue")
 st.divider()

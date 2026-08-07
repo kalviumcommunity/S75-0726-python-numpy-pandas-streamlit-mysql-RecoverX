@@ -6,12 +6,30 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import io
-from src.ui_components import setup_page, render_header, render_sidebar, render_footer
+from src.ui_components import setup_page, render_header, render_sidebar, render_footer, require_page_permission
 from src.payment_queries import get_total_transactions, get_successful_transactions, get_failed_transactions
+
+@st.cache_data(ttl=60)
+def _cached_get_total_transactions(start_date=None, end_date=None):
+    return get_total_transactions(start_date, end_date)
+
+@st.cache_data(ttl=60)
+def _cached_get_successful_transactions(start_date=None, end_date=None):
+    return get_successful_transactions(start_date, end_date)
+
+@st.cache_data(ttl=60)
+def _cached_get_failed_transactions(start_date=None, end_date=None):
+    return get_failed_transactions(start_date, end_date)
+
+get_total_transactions = _cached_get_total_transactions
+get_successful_transactions = _cached_get_successful_transactions
+get_failed_transactions = _cached_get_failed_transactions
 
 setup_page("Dashboard", "📊")
 render_header()
 date_range = render_sidebar()
+
+require_page_permission("Dashboard")
 
 # --- Metrics Cards ---
 st.subheader("Key Metrics")
