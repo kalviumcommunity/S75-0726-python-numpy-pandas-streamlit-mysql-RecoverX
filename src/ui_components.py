@@ -19,7 +19,7 @@ def setup_page(page_title="RecoverX", page_icon="💰"):
         page_title=f"RecoverX - {page_title}",
         page_icon=page_icon,
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="expanded",
     )
     st.markdown(
         """
@@ -29,23 +29,64 @@ def setup_page(page_title="RecoverX", page_icon="💰"):
             background-color: #0f172a !important;
             color: white !important;
         }
-        [data-testid="stSidebar"] * {
-            color: white !important;
+        [data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"] {
+            color: #0f172a !important;
         }
-        [data-testid="stSidebar"] .st-emotion-cache-1r6slb0 {
-            color: white !important;
+        """
+        body_fg_css = ""
+    else:
+        body_bg_css = """
+        [data-testid="stAppViewContainer"], .main, .block-container {
+            background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%) !important;
+            color: #0f172a !important;
         }
-        /* Sidebar header text */
-        [data-testid="stSidebarNav"] span {
-            color: white !important;
+        [data-testid="stMarkdownContainer"] h1,
+        [data-testid="stMarkdownContainer"] h2,
+        [data-testid="stMarkdownContainer"] h3 {
+            color: #1e3a8a !important;
         }
-        /* Sidebar active link */
-        [data-testid="stSidebarNavLink"] {
-            color: white !important;
-        }
+        """
+        body_fg_css = ""
+
+    st.markdown(
+        f"""
+        <style>
+        /* Sidebar background + foreground */
+        [data-testid="stSidebar"] {{
+            background: {theme['sidebar_bg']} !important;
+            color: {theme['sidebar_fg']} !important;
+            border-right: 1px solid {theme['sidebar_border']};
+        }}
+        [data-testid="stSidebar"] * {{
+            color: {theme['sidebar_fg']} !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {{
+            color: {theme['sidebar_subtle']} !important;
+        }}
+        [data-testid="stSidebarNav"] span {{
+            color: {theme['sidebar_fg']} !important;
+        }}
+        [data-testid="stSidebarNavLink"] {{
+            color: {theme['sidebar_fg']} !important;
+            border-radius: 0.5rem;
+        }}
+        [data-testid="stSidebarNavLink"]:hover {{
+            background-color: rgba(255,255,255,0.08);
+        }}
+        [data-testid="stSidebarContent"] hr,
+        [data-testid="stSidebar"] hr {{
+            border-color: {theme['sidebar_border']} !important;
+        }}
+        /* Global accent on primary buttons */
+        button[kind="primary"] {{
+            background-color: {theme['accent']} !important;
+            border-color: {theme['accent']} !important;
+        }}
+        {body_bg_css}
+        {body_fg_css}
         </style>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 
@@ -53,13 +94,43 @@ def _render_auth_section():
     """Render the login/logout box inside the sidebar, managing session_state["user"]."""
     with st.sidebar.container():
         st.markdown(
+ frontend_changes
+            f"""
+            <div style="padding: 1rem 0; border-bottom: 1px solid {theme['sidebar_border']}; margin-bottom: 1rem;">
+                <h2 style="color: {theme['sidebar_fg']}; margin:0; font-size: 1.25rem;">💰 RecoverX</h2>
+                <p style="color: {theme['sidebar_subtle']}; margin: 0.25rem 0 0 0; font-size: 0.875rem;">Payment Analytics</p>
+
             """
-            <div style="padding: 1rem 0; border-bottom: 1px solid #334155; margin-bottom: 1rem;">
-                <h2 style="color: white; margin:0; font-size: 1.25rem;">💰 RecoverX</h2>
-                <p style="color: #94a3b8; margin: 0.25rem 0 0 0; font-size: 0.875rem;">Payment Analytics</p>
+            <div style="padding: 1rem 0; border-bottom: 1px solid rgba(148,163,184,0.35); margin-bottom: 1rem;">
+                <h2 style="margin:0; font-size: 1.25rem;">💰 RecoverX</h2>
+                <p style="margin: 0.25rem 0 0 0; font-size: 0.875rem;">Payment Analytics</p>
+ main
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            f"<div style='margin-bottom: 0.5rem; color: {theme['sidebar_subtle']}; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;'>🎨 Theme</div>",
+            unsafe_allow_html=True,
+        )
+        new_theme = st.radio(
+            "Appearance",
+            options=list(THEMES.keys()),
+            index=list(THEMES.keys()).index(theme_name) if theme_name in THEMES else 0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="theme_picker",
+            help="Switch between Dark, Light, and Blue dashboard themes.",
+        )
+        if new_theme != theme_name:
+            st.session_state["theme"] = new_theme
+            st.rerun()
+
+        st.divider()
+        st.markdown(
+            f"<div style='margin-bottom: 0.5rem; color: {theme['sidebar_subtle']}; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;'>📅 Filters</div>",
+            unsafe_allow_html=True,
         )
 
         user = st.session_state.get("user")
@@ -117,6 +188,7 @@ def render_sidebar():
     return date_range
 
 
+
 def render_header():
     st.markdown(
         """
@@ -126,7 +198,7 @@ def render_header():
             </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 

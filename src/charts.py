@@ -59,6 +59,123 @@ def placeholder_revenue_recovery():
     return fig
 
 
+def revenue_impact_over_time_chart(data=None):
+    if data is None:
+        return placeholder_revenue_recovery()
+
+    df = pd.DataFrame(data)
+
+    if df.empty or "period" not in df.columns:
+        return placeholder_revenue_recovery()
+
+    df = df.copy()
+    df["period"] = pd.to_datetime(df["period"], errors="coerce")
+    df = df.dropna(subset=["period"]).sort_values("period")
+
+    if df.empty:
+        return placeholder_revenue_recovery()
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=df["period"],
+            y=df.get("recoverable_revenue", 0),
+            name="Recoverable",
+            fill="tozeroy",
+            line_color="#16a34a",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["period"],
+            y=df.get("permanently_lost_revenue", 0),
+            name="Permanently Lost",
+            fill="tonexty",
+            line_color="#dc2626",
+        )
+    )
+    fig.update_layout(
+        title="Revenue Impact Over Time",
+        height=380,
+        margin=dict(l=0, r=0, t=50, b=0),
+        xaxis_title="",
+        yaxis_title="Revenue",
+    )
+    return fig
+
+
+def revenue_impact_by_gateway_chart(data=None):
+    if data is None:
+        return go.Figure()
+
+    df = pd.DataFrame(data)
+
+    if df.empty:
+        return go.Figure()
+
+    for col in ["recoverable_revenue", "permanently_lost_revenue"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    fig = px.bar(
+        df,
+        x="gateway",
+        y=["recoverable_revenue", "permanently_lost_revenue"],
+        barmode="stack",
+        color_discrete_sequence=["#16a34a", "#dc2626"],
+        labels={
+            "value": "Revenue",
+            "gateway": "Gateway",
+            "variable": "",
+        },
+    )
+    fig.update_layout(
+        title="Revenue Impact by Gateway",
+        height=380,
+        margin=dict(l=0, r=0, t=50, b=0),
+        xaxis_tickangle=-20,
+    )
+    return fig
+
+
+def recovery_score_distribution_chart(distribution=None):
+    """
+    Bar chart for recovery score distribution buckets.
+    """
+    if not distribution:
+        return go.Figure()
+
+    df = pd.DataFrame(distribution)
+
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=df["score_range"],
+                y=df["count"],
+                marker_color="#2563eb",
+                text=df["count"],
+                textposition="outside",
+                hovertemplate=(
+                    "Recovery Score: %{x}<br>"
+                    "Transactions: %{y}<br>"
+                    "<extra></extra>"
+                ),
+            )
+        ]
+    )
+
+    fig.update_layout(
+        title="Recovery Score Distribution",
+        height=380,
+        margin=dict(l=0, r=0, t=50, b=0),
+        xaxis_title="Recovery Score Range",
+        yaxis_title="Transactions",
+        showlegend=False,
+    )
+
+    return fig
+
+
 def placeholder_response_code_distribution():
     """
     Placeholder chart for bank response code distribution.

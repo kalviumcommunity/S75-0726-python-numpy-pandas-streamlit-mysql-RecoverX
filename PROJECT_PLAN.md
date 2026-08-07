@@ -71,7 +71,7 @@ This plan covers all remaining features for RecoverX, a payment analytics platfo
   - **Reshma (Frontend):** Highlight high-value failed transactions with recovery potential
   - **Tejal (Backend + Frontend):** Add recovery score distribution using NumPy utilities and display
   - **Yogesh (Frontend):** Build prioritized list of transactions to retry
-  - **Dharshni (Frontend):** Add revenue impact visualizations and export to Excel
+  - **Dharshni  (Frontend):** Add revenue impact visualizations and export to Excel
 
 ---
 

@@ -1,5 +1,6 @@
 
 import sys
+from io import BytesIO, StringIO
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -13,7 +14,7 @@ from src.payment_queries import (
     count_filtered_transactions,
     get_transaction_status_over_time,
     get_retry_attempts_distribution,
-    get_retry_history
+    get_retry_history_with_bank_details,
 )
 
 @st.cache_data(ttl=60)
@@ -90,7 +91,6 @@ with chart_col2:
         df_retry["attempt_category"] = df_retry["attempt_count"].apply(lambda x: "4+" if x >=4 else str(x))
         retry_counts = df_retry["attempt_category"].value_counts().reset_index()
         retry_counts.columns = ["Attempts", "Transactions"]
-        # Sort the attempts correctly
         retry_counts["sort_key"] = retry_counts["Attempts"].apply(lambda x: 4 if x == "4+" else int(x))
         retry_counts = retry_counts.sort_values("sort_key").drop("sort_key", axis=1)
         fig = px.bar(retry_counts, x="Attempts", y="Transactions", color="Attempts", 
@@ -105,12 +105,10 @@ st.divider()
 # --- Filtered Transactions Section ---
 st.subheader("Filtered Transactions")
 
-# Get filters
 status_query = status_filter if status_filter != "All" else None
 start_date_str = str(start_date_filter) if start_date_filter else None
 end_date_str = str(end_date_filter) + " 23:59:59" if end_date_filter else None
 
-# Get data
 try:
     transactions = get_filtered_transactions(
         transaction_id=transaction_id_filter,
@@ -133,8 +131,36 @@ except Exception as error:
 
 if not transactions.empty:
     df_transactions = transactions
+    st.caption(f"Showing {len(df_transactions)} of {total_transactions} matching transactions.")
     st.dataframe(df_transactions, width='stretch')
-    
+
+    # --- CSV + Excel Export for Filtered Transactions ---
+    st.markdown("#### Exports")
+    exp_col1, exp_col2 = st.columns(2)
+
+    with exp_col1:
+        csv_buffer = StringIO()
+        df_transactions.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="📥 Filtered Transactions (CSV)",
+            data=csv_buffer.getvalue(),
+            file_name="filtered_transactions.csv",
+            mime="text/csv",
+        )
+
+    with exp_col2:
+        excel_buffer = BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+            df_transactions.to_excel(writer, index=False, sheet_name="Transactions")
+        st.download_button(
+            label="📥 Filtered Transactions (Excel)",
+            data=excel_buffer.getvalue(),
+            file_name="filtered_transactions.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    st.divider()
+
     # Show transaction details on select
     selected_txn = st.selectbox(
         "Select a transaction to view its lifecycle",
@@ -144,24 +170,25 @@ if not transactions.empty:
     if selected_txn:
         st.markdown(f"### Transaction Lifecycle: {selected_txn}")
         try:
-            retries = get_retry_history(selected_txn)
+            retries = get_retry_history_with_bank_details(selected_txn)
         except Exception as error:
             st.error(f"Unable to load retry history: {error}")
             retries = pd.DataFrame()
         
-        # Get selected transaction's created_at
         txn_data = df_transactions[df_transactions["transaction_id"] == selected_txn].iloc[0]
         
-        # Prepare timeline data
+        # --- Enriched Timeline Data (with recommended_action) ---
         timeline_data = []
-        # Initial transaction
         timeline_data.append({
             "event": "Initial Transaction",
             "timestamp": pd.to_datetime(txn_data["created_at"]),
-            "status": txn_data["initial_status"],
-            "type": "transaction"
+            "status": txn_data.get("initial_status", "UNKNOWN"),
+            "type": "transaction",
+            "response_code": txn_data.get("payment_method", ""),
+            "response_message": "Original payment attempt",
+            "recommended_action": "",
         })
-        # Add retries
+
         if not retries.empty:
             df_retries = retries
             for _, retry in df_retries.iterrows():
@@ -169,32 +196,45 @@ if not transactions.empty:
                     "event": f"Retry Attempt {retry['attempt_number']}",
                     "timestamp": pd.to_datetime(retry["retry_timestamp"]),
                     "status": retry["retry_status"],
-                    "type": "retry"
+                    "type": "retry",
+                    "response_code": retry.get("response_code", ""),
+                    "response_message": retry.get("response_message", ""),
+                    "recommended_action": retry.get("recommended_action", ""),
                 })
+
         df_timeline = pd.DataFrame(timeline_data)
         df_timeline = df_timeline.sort_values("timestamp").reset_index(drop=True)
         
-        # Display visual timeline
+        # --- Visual Timeline with recommended_action in tooltip ---
         st.subheader("Timeline")
-        # Create color mapping for status
         color_map = {"SUCCESS": "#16a34a", "FAILED": "#dc2626"}
         df_timeline["color"] = df_timeline["status"].map(lambda x: color_map.get(x, "#6b7280"))
         
         fig = go.Figure()
         for idx, row in df_timeline.iterrows():
+            event_text = row["event"]
+            response_code = row.get("response_code") or ""
+            response_message = row.get("response_message") or ""
+            action = row.get("recommended_action") or ""
+            tooltip = (
+                f"<b>{event_text}</b><br>"
+                f"Timestamp: {row['timestamp']}<br>"
+                f"Status: {row['status']}<br>"
+                f"Response Code: {response_code}<br>"
+                f"Response Message: {response_message}<br>"
+                f"Recommended Action: {action if action else 'N/A'}"
+            )
             fig.add_trace(go.Scatter(
                 x=[row["timestamp"]],
                 y=[idx],
                 mode="markers+text",
                 marker=dict(size=15, color=row["color"]),
-                text=[row["event"]],
+                text=[event_text],
                 textposition="top center",
-                name=row["event"],
-                hovertemplate="<b>%{text}</b><br>Timestamp: %{x}<br>Status: %{customdata[0]}<extra></extra>",
-                customdata=[[row["status"]]]
+                name=event_text,
+                hovertemplate=tooltip + "<extra></extra>",
             ))
         
-        # Add connecting lines
         if len(df_timeline) > 1:
             for i in range(1, len(df_timeline)):
                 fig.add_trace(go.Scatter(
@@ -222,13 +262,51 @@ if not transactions.empty:
         )
         st.plotly_chart(fig, width='stretch')
         
-        # Display dataframe
+        # --- Per-transaction retry details with response codes ---
         st.subheader("Details")
-        if not retries.empty:
-            st.dataframe(df_retries, width='stretch')
+        if not retries.empty and not df_retries.empty:
+            detail_cols = [
+                c for c in [
+                    "attempt_number",
+                    "retry_timestamp",
+                    "retry_status",
+                    "response_code",
+                    "response_message",
+                    "recommended_action",
+                    "recovery_potential",
+                    "gateway_txn_ref",
+                ] if c in df_retries.columns
+            ]
+            display_details = df_retries[detail_cols].copy()
+            display_details.columns = [c.replace("_", " ").title() for c in detail_cols]
+            st.dataframe(display_details, hide_index=True, width="stretch")
+
+            with st.expander("Export This Transaction's Retry Details"):
+                dtc1, dtc2 = st.columns(2)
+                with dtc1:
+                    csv_det = df_retries.to_csv(index=False)
+                    st.download_button(
+                        "📥 Retry Details (CSV)",
+                        csv_det,
+                        f"retry_details_{selected_txn}.csv",
+                        "text/csv",
+                        key=f"export_csv_{selected_txn}",
+                    )
+                with dtc2:
+                    excel_det = BytesIO()
+                    with pd.ExcelWriter(excel_det, engine="openpyxl") as writer:
+                        df_retries.to_excel(writer, index=False, sheet_name="RetryHistory")
+                    st.download_button(
+                        "📥 Retry Details (Excel)",
+                        excel_det.getvalue(),
+                        f"retry_details_{selected_txn}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"export_xlsx_{selected_txn}",
+                    )
         else:
             st.info("No retry attempts found for this transaction.")
 else:
     st.info("No transactions found matching your filters.")
 
 render_footer()
+

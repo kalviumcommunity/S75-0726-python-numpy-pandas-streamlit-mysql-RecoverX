@@ -1,5 +1,6 @@
 
 import pandas as pd
+import plotly.graph_objects as go
 
 from src.db import execute_query
 
@@ -53,6 +54,37 @@ def get_retry_history(transaction_id, page=1, limit=10):
         params = (transaction_id, limit, offset)
     else:
         params = (transaction_id,)
+    rows = execute_query(query, params, fetch=True)
+    return pd.DataFrame(rows or [])
+
+
+def get_retry_history_with_bank_details(transaction_id, limit=None):
+    if limit:
+        limit_clause = " LIMIT %s"
+        params = (transaction_id, int(limit))
+    else:
+        limit_clause = ""
+        params = (transaction_id,)
+    query = f"""
+    SELECT
+        pr.retry_id,
+        pr.transaction_id,
+        pr.attempt_number,
+        pr.retry_timestamp,
+        pr.retry_status,
+        pr.response_code,
+        pr.gateway_txn_ref,
+        pr.created_at,
+        COALESCE(brc.description, '') AS response_message,
+        COALESCE(brc.failure_type, '') AS failure_type,
+        COALESCE(brc.recommended_action, '') AS recommended_action,
+        COALESCE(brc.recovery_potential, 0) AS recovery_potential
+    FROM payment_retries pr
+    LEFT JOIN bank_response_codes brc ON pr.response_code = brc.response_code
+    WHERE pr.transaction_id = %s
+    ORDER BY pr.attempt_number ASC
+    {limit_clause}
+    """
     rows = execute_query(query, params, fetch=True)
     return pd.DataFrame(rows or [])
 
@@ -184,6 +216,369 @@ def get_failure_type_distribution():
     return result
 
 
+# ==========================================================
+# DAY 7 - ALERTS & NOTIFICATIONS
+# ==========================================================
+
+def get_alert_rules():
+    """
+    Return all alert rules ordered by most recently updated.
+    """
+    query = """
+    SELECT
+        rule_id,
+        rule_name,
+        rule_type,
+        threshold_value,
+        threshold_condition,
+        is_active,
+        created_at,
+        updated_at
+    FROM alert_rules
+    ORDER BY updated_at DESC, rule_id DESC;
+    """
+    rows = execute_query(query, fetch=True) or []
+
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "rule_id": int(row["rule_id"]),
+                "rule_name": row["rule_name"],
+                "rule_type": row["rule_type"],
+                "threshold_value": float(row["threshold_value"] or 0),
+                "threshold_condition": row["threshold_condition"],
+                "is_active": bool(row["is_active"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        )
+
+    return result
+
+
+def create_alert_rule(
+    rule_name,
+    rule_type,
+    threshold_value,
+    threshold_condition,
+    is_active,
+):
+    """
+    Create a new alert rule.
+    """
+    query = """
+    INSERT INTO alert_rules (
+        rule_name,
+        rule_type,
+        threshold_value,
+        threshold_condition,
+        is_active
+    )
+    VALUES (%s, %s, %s, %s, %s);
+    """
+    return execute_query(
+        query,
+        (
+            rule_name,
+            rule_type,
+            threshold_value,
+            threshold_condition,
+            is_active,
+        ),
+        fetch=False,
+    )
+
+
+def update_alert_rule(
+    rule_id,
+    rule_name,
+    rule_type,
+    threshold_value,
+    threshold_condition,
+    is_active,
+):
+    """
+    Update an existing alert rule.
+    """
+    query = """
+    UPDATE alert_rules
+    SET
+        rule_name = %s,
+        rule_type = %s,
+        threshold_value = %s,
+        threshold_condition = %s,
+        is_active = %s
+    WHERE rule_id = %s;
+    """
+    return execute_query(
+        query,
+        (
+            rule_name,
+            rule_type,
+            threshold_value,
+            threshold_condition,
+            is_active,
+            rule_id,
+        ),
+        fetch=False,
+    )
+
+
+def delete_alert_rule(rule_id):
+    """
+    Delete an alert rule by ID.
+    """
+    query = """
+    DELETE FROM alert_rules
+    WHERE rule_id = %s;
+    """
+    return execute_query(query, (rule_id,), fetch=False)
+
+
+def _evaluate_threshold(value, threshold, condition):
+    if value is None or threshold is None:
+        return False
+
+    if condition == ">":
+        return value > threshold
+    if condition == ">=":
+        return value >= threshold
+    if condition == "<":
+        return value < threshold
+    if condition == "<=":
+        return value <= threshold
+    if condition in ("=", "=="):
+        return value == threshold
+
+    return False
+
+
+def _alert_severity_for_rule(rule_type):
+    mapping = {
+        "failure_rate": "HIGH",
+        "success_rate": "HIGH",
+        "response_trend": "MEDIUM",
+        "revenue_loss": "CRITICAL",
+    }
+    return mapping.get(rule_type, "LOW")
+
+
+def create_alert(
+    rule_id,
+    alert_type,
+    message,
+    severity="MEDIUM",
+    is_resolved=False,
+):
+    query = """
+    INSERT INTO alerts (
+        rule_id,
+        alert_type,
+        message,
+        severity,
+        is_resolved
+    )
+    VALUES (%s, %s, %s, %s, %s);
+    """
+    return execute_query(
+        query,
+        (
+            rule_id,
+            alert_type,
+            message,
+            severity,
+            is_resolved,
+        ),
+        fetch=False,
+    )
+
+
+def _alert_exists(rule_id, message, window_hours=24):
+    query = """
+    SELECT alert_id
+    FROM alerts
+    WHERE rule_id = %s
+      AND message = %s
+      AND created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+    """
+    rows = execute_query(query, (rule_id, message, window_hours), fetch=True)
+    return bool(rows)
+
+
+def get_alerts(is_resolved=None, limit=50):
+    query = "SELECT * FROM alerts"
+    params = []
+    if is_resolved is not None:
+        query += " WHERE is_resolved = %s"
+        params.append(is_resolved)
+
+    query += " ORDER BY created_at DESC LIMIT %s"
+    params.append(limit)
+
+    return execute_query(query, tuple(params), fetch=True) or []
+
+
+def get_transaction_counts(start_date: str = None, end_date: str = None):
+    query = """
+    SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN final_status = 'SUCCESS' THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN final_status = 'FAILED' THEN 1 ELSE 0 END) AS failed
+    FROM transactions
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND created_at >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= %s"
+        params.append(end_date)
+
+    rows = execute_query(query, tuple(params), fetch=True) or []
+    return rows[0] if rows else {"total": 0, "success": 0, "failed": 0}
+
+
+def get_top_response_trend(start_date: str = None, end_date: str = None):
+    query = """
+    SELECT
+        pr.response_code,
+        COALESCE(brc.description, 'Unknown') AS description,
+        COUNT(*) AS count
+    FROM payment_retries pr
+    LEFT JOIN bank_response_codes brc
+        ON pr.response_code = brc.response_code
+    WHERE pr.retry_status = 'FAILED'
+    """
+    params = []
+    if start_date:
+        query += " AND pr.retry_timestamp >= %s"
+        params.append(start_date)
+    if end_date:
+        query += " AND pr.retry_timestamp <= %s"
+        params.append(end_date)
+
+    query += " GROUP BY pr.response_code, brc.description ORDER BY count DESC LIMIT 1"
+
+    rows = execute_query(query, tuple(params), fetch=True) or []
+    if not rows:
+        return None
+
+    failed_total = _get_total(
+        "SELECT COUNT(*) AS total FROM payment_retries WHERE retry_status = 'FAILED'"
+        + (" AND retry_timestamp >= %s" if start_date else "")
+        + (" AND retry_timestamp <= %s" if end_date else ""),
+        tuple(params) if params else None,
+    )
+    if not failed_total:
+        return None
+
+    top_row = rows[0]
+    share = round((float(top_row["count"]) / failed_total) * 100, 2)
+    return {
+        "response_code": top_row["response_code"],
+        "description": top_row["description"],
+        "count": int(top_row["count"]),
+        "share": share,
+    }
+
+
+def generate_alerts_from_rules(start_date: str = None, end_date: str = None):
+    rules = [rule for rule in get_alert_rules() if rule["is_active"]]
+    if not rules:
+        return []
+
+    counts = get_transaction_counts(start_date, end_date)
+    total = int(counts.get("total", 0) or 0)
+    successful = int(counts.get("success", 0) or 0)
+    failed = int(counts.get("failed", 0) or 0)
+
+    failure_rate = round((failed / total) * 100, 2) if total else 0.0
+    success_rate = round((successful / total) * 100, 2) if total else 0.0
+    response_trend = get_top_response_trend(start_date, end_date)
+
+    needs_revenue = any(rule["rule_type"] == "revenue_loss" for rule in rules)
+    revenue_summary = None
+    if needs_revenue:
+        try:
+            revenue_summary = get_revenue_recovery_summary(start_date, end_date)
+        except Exception:
+            revenue_summary = None
+
+    created_alerts = []
+
+    for rule in rules:
+        triggered = False
+        message = None
+
+        if rule["rule_type"] == "failure_rate":
+            triggered = _evaluate_threshold(
+                failure_rate,
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Failure rate is {failure_rate}% which {'exceeds' if rule['threshold_condition'] in ('>', '>=') else 'meets'} "
+                f"the threshold of {rule['threshold_value']}%."
+            )
+        elif rule["rule_type"] == "success_rate":
+            triggered = _evaluate_threshold(
+                success_rate,
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Success rate is {success_rate}% which {'falls below' if rule['threshold_condition'] in ('<', '<=') else 'meets'} "
+                f"the threshold of {rule['threshold_value']}%."
+            )
+        elif rule["rule_type"] == "response_trend" and response_trend:
+            triggered = _evaluate_threshold(
+                response_trend["share"],
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Response code {response_trend['response_code']} ({response_trend['description']}) accounts for "
+                f"{response_trend['share']}% of failed retries, above the threshold of {rule['threshold_value']}%."
+            )
+        elif rule["rule_type"] == "revenue_loss" and revenue_summary:
+            recoverable = float(revenue_summary.get("recoverable_revenue", 0) or 0)
+            permanently_lost = float(revenue_summary.get("permanently_lost_revenue", 0) or 0)
+            total_at_risk = recoverable + permanently_lost
+            triggered = _evaluate_threshold(
+                total_at_risk,
+                float(rule["threshold_value"] or 0),
+                rule["threshold_condition"],
+            )
+            message = (
+                f"Revenue at risk is ${total_at_risk:,.2f} (${recoverable:,.2f} recoverable + "
+                f"${permanently_lost:,.2f} permanently lost), which {'exceeds' if rule['threshold_condition'] in ('>', '>=') else 'meets'} "
+                f"the threshold of ${float(rule['threshold_value'] or 0):,.2f}."
+            )
+
+        if triggered and message:
+            if not _alert_exists(rule["rule_id"], message):
+                severity = _alert_severity_for_rule(rule["rule_type"])
+                created = create_alert(
+                    rule_id=rule["rule_id"],
+                    alert_type=rule["rule_type"],
+                    message=message,
+                    severity=severity,
+                )
+                if created:
+                    created_alerts.append(
+                        {
+                            "rule_id": rule["rule_id"],
+                            "alert_type": rule["rule_type"],
+                            "message": message,
+                            "severity": severity,
+                        }
+                    )
+
+    return created_alerts
+
+
 # -----------------------------
 # Failure Classification
 # -----------------------------
@@ -203,6 +598,265 @@ def count_failure_classifications():
     FROM failure_classifications;
     """
     return _get_total(query)
+
+
+def get_revenue_recovery_summary(
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'TEMPORARY'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS recoverable_revenue,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'PERMANENT'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS permanently_lost_revenue
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
+    row = rows[0] if rows else {}
+
+    return {
+        "recoverable_revenue": float(row.get("recoverable_revenue") or 0),
+        "permanently_lost_revenue": float(row.get("permanently_lost_revenue") or 0),
+    }
+
+
+def get_recovery_score_distribution(
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        COALESCE(fc.recovery_score, brc.recovery_potential) AS score
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+        AND COALESCE(fc.recovery_score, brc.recovery_potential) IS NOT NULL
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True) or []
+    scores = pd.to_numeric(pd.Series([r.get("score") for r in rows]), errors="coerce").dropna()
+    scores = scores.clip(lower=0, upper=1)
+
+    if scores.empty:
+        return {
+            "distribution": [],
+            "stats": {},
+            "percentiles": {},
+            "total_scores": 0,
+        }
+
+    bins = [0, 0.2, 0.4, 0.6, 0.8, 1.0000001]
+    labels = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"]
+    bucketed = pd.cut(scores, bins=bins, labels=labels, include_lowest=True, right=False)
+    counts = bucketed.value_counts().reindex(labels, fill_value=0)
+
+    distribution = [
+        {"score_range": label, "count": int(counts[label])}
+        for label in labels
+    ]
+
+    percentiles = scores.quantile([0.25, 0.75, 0.9]).to_dict()
+
+    return {
+        "distribution": distribution,
+        "stats": {
+            "mean": float(scores.mean()),
+            "median": float(scores.median()),
+        },
+        "percentiles": {
+            "p25": float(percentiles.get(0.25, 0)),
+            "p75": float(percentiles.get(0.75, 0)),
+            "p90": float(percentiles.get(0.9, 0)),
+        },
+        "total_scores": int(scores.shape[0]),
+    }
+
+
+def get_revenue_impact_by_gateway(
+    start_date: str = None,
+    end_date: str = None,
+    limit: int = 10,
+):
+    query = """
+    SELECT
+        COALESCE(t.gateway, 'Unknown') AS gateway,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'TEMPORARY'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS recoverable_revenue,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'PERMANENT'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS permanently_lost_revenue
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    query += """
+    GROUP BY COALESCE(t.gateway, 'Unknown')
+    ORDER BY (recoverable_revenue + permanently_lost_revenue) DESC
+    LIMIT %s
+    """
+    params.append(limit)
+
+    rows = execute_query(query, tuple(params), fetch=True)
+    return pd.DataFrame(rows or [])
+
+
+def get_revenue_impact_over_time(
+    start_date: str = None,
+    end_date: str = None,
+):
+    query = """
+    SELECT
+        DATE(t.created_at) AS period,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'TEMPORARY'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS recoverable_revenue,
+        SUM(
+            CASE
+                WHEN UPPER(COALESCE(fc.failure_type, brc.failure_type, '')) = 'PERMANENT'
+                THEN CAST(t.amount AS DECIMAL(15, 2))
+                ELSE 0
+            END
+        ) AS permanently_lost_revenue
+    FROM transactions t
+    LEFT JOIN (
+        SELECT pr1.transaction_id, pr1.attempt_number, pr1.retry_timestamp, pr1.retry_status, pr1.response_code
+        FROM payment_retries pr1
+        JOIN (
+            SELECT transaction_id, MAX(attempt_number) AS max_attempt_number
+            FROM payment_retries
+            GROUP BY transaction_id
+        ) pr2
+            ON pr1.transaction_id = pr2.transaction_id
+            AND pr1.attempt_number = pr2.max_attempt_number
+    ) lpr
+        ON t.transaction_id = lpr.transaction_id
+    LEFT JOIN bank_response_codes brc
+        ON lpr.response_code = brc.response_code
+    LEFT JOIN failure_classifications fc
+        ON t.transaction_id = fc.transaction_id
+    WHERE
+        (t.final_status IS NULL OR t.final_status != 'SUCCESS')
+    """
+    params = []
+
+    if start_date:
+        query += " AND t.created_at >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND t.created_at <= %s"
+        params.append(end_date)
+
+    query += """
+    GROUP BY DATE(t.created_at)
+    ORDER BY DATE(t.created_at)
+    """
+
+    rows = execute_query(query, tuple(params) if params else None, fetch=True)
+    return pd.DataFrame(rows or [])
 
 
 # -----------------------------
@@ -401,6 +1055,54 @@ def get_failed_transactions(start_date=None, end_date=None):
         params.append(end_date)
     query += ";"
     return _get_total(query, tuple(params) if params else None)
+
+
+def get_dashboard_key_metrics():
+    """
+    Return real-time dashboard KPI values.
+    """
+    total_query = """
+    SELECT COUNT(*) AS total
+    FROM transactions;
+    """
+    successful_query = """
+    SELECT COUNT(*) AS total
+    FROM transactions
+    WHERE UPPER(COALESCE(final_status, '')) = 'SUCCESS';
+    """
+    revenue_recovered_query = """
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM transactions
+    WHERE UPPER(COALESCE(initial_status, '')) != 'SUCCESS'
+      AND UPPER(COALESCE(final_status, '')) = 'SUCCESS';
+    """
+    retry_attempts_query = """
+    SELECT COUNT(*) AS total
+    FROM payment_retries;
+    """
+
+    total_rows = execute_query(total_query, fetch=True) or []
+    successful_rows = execute_query(successful_query, fetch=True) or []
+    recovered_rows = execute_query(revenue_recovered_query, fetch=True) or []
+    retry_rows = execute_query(retry_attempts_query, fetch=True) or []
+
+    total_transactions = int((total_rows[0] or {}).get("total", 0)) if total_rows else 0
+    successful_transactions = int((successful_rows[0] or {}).get("total", 0)) if successful_rows else 0
+    revenue_recovered = float((recovered_rows[0] or {}).get("total", 0) or 0) if recovered_rows else 0.0
+    retry_attempts = int((retry_rows[0] or {}).get("total", 0)) if retry_rows else 0
+
+    success_rate = round(
+        (successful_transactions / total_transactions) * 100,
+        1,
+    ) if total_transactions else 0.0
+
+    return {
+        "total_transactions": total_transactions,
+        "successful_transactions": successful_transactions,
+        "success_rate": success_rate,
+        "revenue_recovered": revenue_recovered,
+        "retry_attempts": retry_attempts,
+    }
 
 
 def get_filtered_transactions(
